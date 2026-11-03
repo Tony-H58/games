@@ -1,0 +1,579 @@
+<!DOCTYPE html>
+<html lang="zh-Hant">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1,maximum-scale=1,user-scalable=no">
+<title>拳擊比賽</title>
+<style>
+  html,body{margin:0;height:100%;background:#0b0b14;color:#fff;font-family:system-ui,-apple-system,"PingFang TC","Noto Sans TC",sans-serif;overflow:hidden;touch-action:none;user-select:none;-webkit-user-select:none}
+  #app{max-width:520px;margin:0 auto;height:100%;display:flex;flex-direction:column}
+  #wrap{position:relative;flex:1;min-height:0;display:flex;justify-content:center;align-items:center;padding-top:6px}
+  canvas{display:block;touch-action:none;border-radius:12px}
+  #ctrl{display:grid;grid-template-columns:1fr 1.3fr 1.3fr 1fr;gap:8px;padding:8px 10px 14px}
+  #ctrl button{border:0;border-radius:18px;color:#fff;font-weight:900;height:84px;touch-action:none;font-size:15px;line-height:1.25}
+  #ctrl button span{display:block;font-size:30px}
+  #ctrl .dg{background:#334155;box-shadow:0 5px 0 #0f172a}
+  #ctrl .pn{background:#dc2626;box-shadow:0 5px 0 #7f1d1d}
+  #ctrl button.on{transform:translateY(4px);box-shadow:0 1px 0 #0006}
+  #ctrl small{display:block;font-size:10px;font-weight:500;opacity:.8}
+  .ov{position:absolute;inset:0;display:flex;align-items:center;justify-content:center;z-index:5}
+  .box{background:#16162af5;border:2px solid #ef4444;border-radius:16px;padding:16px;width:min(330px,90%);text-align:center;max-height:94%;overflow:auto}
+  .box h2{margin:0 0 6px;font-size:27px;color:#fbbf24}
+  .box p{font-size:12.5px;line-height:1.7;margin:6px 0 10px;text-align:left}
+  .opp{display:flex;align-items:center;gap:10px;width:100%;margin:5px 0;border:2px solid #ffffff22;border-radius:12px;background:#24243f;color:#fff;padding:7px 10px;text-align:left}
+  .opp b{font-size:15px} .opp small{display:block;font-size:11px;color:#c7d2fe}
+  .opp .ic{font-size:26px} .opp .st{margin-left:auto;font-size:18px}
+  .opp:disabled{opacity:.38}
+  .go{width:100%;background:#dc2626;color:#fff;border:0;border-radius:12px;padding:12px;font-size:16px;font-weight:800;margin-top:6px}
+  .go.alt{background:#334155}
+  .stats{display:grid;grid-template-columns:1fr 1fr;gap:6px;margin:8px 0 8px}
+  .stats div{background:#0007;border-radius:10px;padding:7px;font-size:11px}
+  .stats b{display:block;font-size:18px;color:#fbbf24}
+  [hidden]{display:none!important}
+</style>
+</head>
+<body>
+<div id="app">
+  <div id="wrap">
+    <canvas id="c"></canvas>
+    <div class="ov" id="menu"><div class="box">
+      <h2>🥊 拳擊比賽</h2>
+      <p>👊 <b>點拳頭</b>出直拳，<b>往上滑</b>出上勾拳（可以打破防守）。<br>
+      ↩️ 對手拳套<b>發亮</b>就是要出拳了：<b>左邊亮往右閃、右邊亮往左閃</b>！閃過後馬上打 = <b>Counter 兩倍傷害</b>。<br>
+      🛡️ <b>兩個拳頭一起按住</b> = 防禦，會消耗體力。<br>
+      倒地後<b>連點畫面</b>才站得起來。3 回合，擊倒 3 次直接贏！</p>
+      <div id="opps"></div>
+    </div></div>
+    <div class="ov" id="over" hidden><div class="box">
+      <h2 id="oTitle"></h2>
+      <div class="stats" id="oStats"></div>
+      <button class="go" id="oNext">挑戰下一位</button>
+      <button class="go alt" id="oMenu">選擇對手</button>
+    </div></div>
+  </div>
+  <div id="ctrl">
+    <button class="dg" id="bDL"><span>⬅️</span>左閃</button>
+    <button class="pn" id="bPL"><span>🥊</span>左拳<small>往上滑：上勾拳</small></button>
+    <button class="pn" id="bPR"><span>🥊</span>右拳<small>兩拳按住：防禦</small></button>
+    <button class="dg" id="bDR"><span>➡️</span>右閃</button>
+  </div>
+</div>
+<script>
+(() => {
+const $ = id => document.getElementById(id);
+const W = 400, H = 560, ROUND_T = 60;
+const OPP = [
+  { name: '新手阿強', ic: '🟢', desc: '動作慢，很好讀', skin: '#f2c49b', hair: '#1f2937', trunks: '#16a34a', glove: '#22c55e', hp: 120, wind: .7, think: [1.1, 1.9], dmg: 8, guard: .08, fake: 0, combo: 1, dodge: 0, armor: false },
+  { name: '快拳小林', ic: '🔵', desc: '連打很快', skin: '#f5d0a9', hair: '#111827', trunks: '#2563eb', glove: '#3b82f6', hp: 120, wind: .46, think: [.7, 1.3], dmg: 6, guard: .14, fake: 0, combo: 3, dodge: .06, armor: false, band: '#ef4444' },
+  { name: '重砲大熊', ic: '🟤', desc: '慢，但一拳很痛', skin: '#d6a77a', hair: '#3f2a1a', trunks: '#78350f', glove: '#92400e', hp: 170, wind: .85, think: [1.1, 1.7], dmg: 20, guard: .1, fake: 0, combo: 1, dodge: 0, armor: true, beard: true, big: 1.12 },
+  { name: '假動作老陳', ic: '🟣', desc: '很會騙你閃', skin: '#eab98e', hair: '#9ca3af', trunks: '#7c3aed', glove: '#a855f7', hp: 135, wind: .52, think: [.8, 1.4], dmg: 9, guard: .25, fake: .38, combo: 2, dodge: .14, armor: false, stache: true },
+  { name: '冠軍鐵拳', ic: '🔴', desc: '全部都會的冠軍', skin: '#c68a5e', hair: '#0b0b0b', trunks: '#b91c1c', glove: '#ef4444', hp: 160, wind: .4, think: [.55, 1.05], dmg: 12, guard: .3, fake: .25, combo: 3, dodge: .22, armor: false, belt: true },
+];
+const cv = $('c'), ctx = cv.getContext('2d');
+let scale = 1;
+function resize() {
+  const wr = $('wrap').getBoundingClientRect();
+  const s = Math.min((wr.width - 6) / W, (wr.height - 6) / H), d = window.devicePixelRatio || 1;
+  cv.style.width = W * s + 'px'; cv.style.height = H * s + 'px';
+  cv.width = Math.round(W * s * d); cv.height = Math.round(H * s * d); scale = s * d;
+}
+addEventListener('resize', resize);
+
+/* 音效 */
+let ac = null;
+function initAudio() { if (!ac) { try { ac = new (window.AudioContext || window.webkitAudioContext)(); } catch (e) {} } else if (ac.state === 'suspended') ac.resume(); }
+function tone(f, d, type = 'sine', v = .07, f2, delay = 0) { if (!ac) return; const t = ac.currentTime + delay, o = ac.createOscillator(), g = ac.createGain(); o.type = type; o.frequency.setValueAtTime(f, t); if (f2) o.frequency.exponentialRampToValueAtTime(f2, t + d); g.gain.setValueAtTime(v, t); g.gain.exponentialRampToValueAtTime(.0001, t + d); o.connect(g).connect(ac.destination); o.start(t); o.stop(t + d + .02); }
+function noise(d, v, lp, hp = 0, delay = 0) { if (!ac) return; const n = ac.sampleRate * d, b = ac.createBuffer(1, n, ac.sampleRate), x = b.getChannelData(0); for (let i = 0; i < n; i++) x[i] = (Math.random() * 2 - 1) * Math.pow(1 - i / n, 2); const s = ac.createBufferSource(), f = ac.createBiquadFilter(), g = ac.createGain(); s.buffer = b; f.type = 'lowpass'; f.frequency.value = lp; g.gain.value = v; let nd = s.connect(f); if (hp) { const h = ac.createBiquadFilter(); h.type = 'highpass'; h.frequency.value = hp; nd = nd.connect(h); } nd.connect(g).connect(ac.destination); s.start(ac.currentTime + delay); }
+const sWhoosh = () => noise(.14, .18, 2500, 600);
+const sHit = big => { noise(big ? .25 : .14, big ? .7 : .45, big ? 900 : 1400); tone(big ? 90 : 130, .15, 'sine', .15, 50); };
+const sBlock = () => { noise(.1, .3, 600); tone(200, .08, 'square', .05); };
+const sBell = (n = 1) => { for (let i = 0; i < n; i++) { tone(1250, 1.2, 'sine', .08, null, i * .35); tone(2500, .8, 'sine', .03, null, i * .35); } };
+const sCrowd = (v = .2, d = 1.5) => noise(d, v, 1800, 300);
+const sCount = () => tone(440, .12, 'square', .05);
+const vib = ms => { try { navigator.vibrate && navigator.vibrate(ms); } catch (e) {} };
+
+/* 紀錄 */
+let beaten = 0; try { beaten = +localStorage.getItem('boxBeaten') || 0; } catch (e) {}
+function buildMenu() {
+  const box = $('opps'); box.innerHTML = '';
+  OPP.forEach((o, i) => {
+    const b = document.createElement('button'); b.className = 'opp'; b.disabled = i > beaten;
+    b.innerHTML = `<span class="ic">${o.ic}</span><span><b>${i + 1}. ${o.name}</b><small>${o.desc}</small></span><span class="st">${i < beaten ? '🏆' : i > beaten ? '🔒' : '🥊'}</span>`;
+    b.onclick = () => { initAudio(); startFight(i); };
+    box.appendChild(b);
+  });
+}
+
+/* 狀態 */
+let state = 'menu', time = 0, oi = 0, O = OPP[0], round = 1, rt = ROUND_T, fx = [], shake = 0, flashA = 0, slow = 0, crowdT = 0;
+const me = { hp: 100, st: 100, punch: null, dodge: null, guard: false, hurt: 0, downs: 0, cool: 0 };
+const op = { hp: 100, max: 100, state: 'idle', t: 0, side: 'L', kind: 'jab', comboLeft: 0, think: 1, hurt: 0, hurtDir: 0, open: 0, downs: 0, guardT: 0, faked: false, dodge: 0, dodgeDir: 0 };
+let stats = null, count = null;   // 倒地讀秒
+function startFight(i) {
+  oi = i; O = OPP[i]; round = 1; rt = ROUND_T; fx = [];
+  Object.assign(me, { hp: 100, st: 100, punch: null, dodge: null, guard: false, hurt: 0, downs: 0, cool: 0 });
+  Object.assign(op, { hp: O.hp, max: O.hp, state: 'idle', t: 0, think: 1.6, hurt: 0, open: 0, downs: 0, dodge: 0 });
+  stats = { landed: 0, thrown: 0, counters: 0, dodges: 0, taken: 0, oLanded: 0, kd: 0 };
+  count = null; state = 'intro'; introT = 2.2; $('menu').hidden = true; $('over').hidden = true;
+  sBell(1); sCrowd(.25, 2);
+}
+let introT = 0;
+
+/* 玩家動作 */
+function punch(hand, kind) {
+  if (state !== 'fight' || me.punch || me.dodge || me.hurt > 0 || me.cool > 0) return;
+  const tired = me.st < 15;
+  me.st = Math.max(0, me.st - (kind === 'upper' ? 16 : 8));
+  me.punch = { hand, kind, t: 0, dur: (kind === 'upper' ? .42 : .24) * (tired ? 1.5 : 1), hitAt: kind === 'upper' ? .22 : .1, done: false, tired };
+  stats.thrown++; sWhoosh();
+}
+function landPunch() {
+  const p = me.punch; p.done = true;
+  if (op.state === 'down' || op.state === 'ko') return;
+  if (op.dodge > 0) { fx.push({ s: '被閃開了', x: 200 + op.dodgeDir * 60, y: 200, t: .6, col: '#d1d5db' }); return; }
+  // 對手反應防禦
+  if (op.state === 'idle' && Math.random() < O.guard * .8) { op.state = 'guard'; op.guardT = .6 + Math.random() * .8; }
+  if (op.state === 'idle' && Math.random() < O.dodge) { op.dodge = .35; op.dodgeDir = Math.random() < .5 ? -1 : 1; fx.push({ s: '被閃開了', x: 200 + op.dodgeDir * 60, y: 200, t: .6, col: '#d1d5db' }); return; }
+  let dmg = p.kind === 'upper' ? 12 : 6;
+  if (p.tired) dmg *= .5;
+  if (op.state === 'guard') {
+    if (p.kind === 'upper') { op.state = 'idle'; op.think = .7; op.hurt = .5; dmg *= .5; fx.push({ s: '破防！', x: 200, y: 150, t: .8, col: '#fde047' }); }
+    else { sBlock(); op.hp -= 1; fx.push({ s: '被擋下', x: 200, y: 170, t: .5, col: '#93c5fd' }); return; }
+  }
+  let counter = op.open > 0;
+  if (counter) { dmg *= 2; stats.counters++; fx.push({ s: 'COUNTER!', x: 200, y: 140, t: .9, col: '#f97316', big: 1 }); slow = .18; sCrowd(.2, 1); }
+  // 打斷對手出拳（大熊有霸體）
+  if (op.state === 'windup' && !O.armor) { op.state = 'idle'; op.think = .6 + Math.random() * .5; op.comboLeft = 0; }
+  op.hp -= dmg; stats.landed++;
+  op.hurt = counter || p.kind === 'upper' ? .45 : .25; op.hurtDir = p.hand === 'L' ? 1 : -1; op.hurtUp = p.kind === 'upper';
+  sHit(counter || p.kind === 'upper'); shake = counter ? .3 : .15; vib(counter ? 40 : 15);
+  for (let i = 0; i < (counter ? 14 : 7); i++) fx.push({ star: 1, x: 200 + op.hurtDir * 20, y: 150, vx: (Math.random() - .5) * 300, vy: -Math.random() * 250, t: .5 });
+  if (op.hp <= 0) oppDown();
+}
+function dodge(dir) {
+  if (state !== 'fight' || me.dodge || me.punch || me.hurt > 0) return;
+  me.dodge = { dir, t: 0, dur: .48 }; sWhoosh(); me.guard = false;
+}
+function setGuard(v) { if (state !== 'fight') { me.guard = false; return; } me.guard = v && !me.dodge; }
+let mashN = 0;
+function mash() { if (count && count.who === 'me') { mashN++; tone(300 + mashN * 20, .05, 'square', .04); } }
+
+/* 對手 AI */
+function oppDecide() {
+  const r = Math.random();
+  if (r < O.guard * .6) { op.state = 'guard'; op.guardT = .8 + Math.random() * 1.2; return; }
+  op.comboLeft = 1 + Math.floor(Math.random() * O.combo);
+  oppWindup();
+}
+function oppWindup() {
+  op.state = 'windup'; op.side = Math.random() < .5 ? 'L' : 'R'; op.kind = Math.random() < .25 ? 'heavy' : 'jab';
+  op.t = 0; op.wind = O.wind * (op.kind === 'heavy' ? 1.25 : 1) * (op.comboLeft > 1 && op.comboStarted ? .75 : 1); op.faked = false; op.comboStarted = true;
+}
+function oppStrike() {
+  op.state = 'strike'; op.t = 0;
+  const dodgeOK = me.dodge && me.dodge.t < me.dodge.dur * .95 && ((op.side === 'L' && me.dodge.dir > 0) || (op.side === 'R' && me.dodge.dir < 0));
+  if (dodgeOK) {
+    stats.dodges++; op.open = .75; sWhoosh(); fx.push({ s: '閃過了！快反擊！', x: 200, y: 120, t: .9, col: '#86efac' });
+    return;
+  }
+  let dmg = O.dmg * (op.kind === 'heavy' ? 1.5 : 1);
+  if (me.guard && me.st > 0) { dmg *= .2; me.st = Math.max(0, me.st - 12); sBlock(); shake = .1; fx.push({ s: '擋住了', x: 200, y: 330, t: .6, col: '#93c5fd' }); }
+  else { sHit(op.kind === 'heavy'); shake = op.kind === 'heavy' ? .45 : .25; flashA = op.kind === 'heavy' ? .45 : .28; me.hurt = .3; stats.oLanded++; vib(op.kind === 'heavy' ? 120 : 60); me.punch = null; }
+  me.hp -= dmg; stats.taken += dmg;
+  if (me.hp <= 0) meDown();
+}
+function oppDown() {
+  op.hp = 0; op.state = 'down'; op.downs++; stats.kd++; op.t = 0; sCrowd(.35, 2.5); slow = .35;
+  fx.push({ s: 'DOWN!', x: 200, y: 140, t: 1.4, col: '#fde047', big: 1 });
+  if (op.downs >= 3) { setTimeout(() => endFight(true, 'TKO 勝！擊倒 3 次'), 1600); state = 'end'; return; }
+  // 讀秒：越後面越難站起來
+  const getUp = Math.random() < (op.downs === 1 ? .85 : .55) ? 4 + Math.floor(Math.random() * 4) : 99;
+  count = { who: 'op', n: 0, t: 0, upAt: getUp };
+}
+function meDown() {
+  me.hp = 0; me.downs++; me.punch = null; me.dodge = null; me.guard = false; sCrowd(.3, 2); flashA = .6;
+  if (me.downs >= 3) { state = 'end'; setTimeout(() => endFight(false, '被擊倒 3 次'), 1600); return; }
+  mashN = 0; count = { who: 'me', n: 0, t: 0, need: 10 + me.downs * 6 };
+}
+
+/* 結束 */
+function endFight(win, why) {
+  state = 'over';
+  if (win && oi + 1 > beaten) { beaten = oi + 1; try { localStorage.setItem('boxBeaten', beaten); } catch (e) {} }
+  buildMenu();
+  $('oTitle').textContent = win ? (oi === 4 ? '👑 新科冠軍！' : '🏆 你贏了！') : '😵 你輸了…';
+  const acc = stats.thrown ? Math.round(stats.landed / stats.thrown * 100) : 0;
+  $('oStats').innerHTML = `<div>結果<b style="font-size:14px">${why}</b></div><div>對手<b style="font-size:14px">${O.name}</b></div><div>命中<b>${stats.landed}/${stats.thrown}（${acc}%）</b></div><div>Counter<b>${stats.counters} 次</b></div><div>閃過<b>${stats.dodges} 次</b></div><div>擊倒對手<b>${stats.kd} 次</b></div>`;
+  $('oNext').hidden = !(win && oi < 4); $('oNext').textContent = '挑戰下一位：' + (OPP[oi + 1]?.name || '');
+  if (win) sCrowd(.35, 3);
+  $('over').hidden = false;
+}
+$('oNext').onclick = () => { initAudio(); startFight(oi + 1); };
+$('oMenu').onclick = () => { $('over').hidden = true; state = 'menu'; buildMenu(); $('menu').hidden = false; };
+
+/* 更新 */
+function update(rdt) {
+  time += rdt;
+  slow = Math.max(0, slow - rdt);
+  const dt = slow > 0 ? rdt * .35 : rdt;
+  fx.forEach(f => { f.t -= rdt; if (f.star) { f.x += f.vx * rdt; f.y += f.vy * rdt; f.vy += 500 * rdt; } }); fx = fx.filter(f => f.t > 0);
+  shake = Math.max(0, shake - rdt); flashA = Math.max(0, flashA - rdt * 1.5);
+  if (state === 'intro') { introT -= rdt; if (introT <= 0) { state = 'fight'; sBell(1); } return; }
+  if (state === 'break') { introT -= rdt; if (introT <= 0) { state = 'fight'; sBell(1); } return; }
+  if (state !== 'fight' && state !== 'end') return;
+  // 讀秒
+  if (count) {
+    count.t += rdt;
+    if (count.t >= .8) { count.t = 0; count.n++; sCount();
+      if (count.who === 'op' && count.n >= count.upAt) { op.hp = op.max * (.55 - op.downs * .1); op.state = 'idle'; op.think = 1.2; count = null; fx.push({ s: '站起來了！', x: 200, y: 150, t: 1, col: '#fca5a5' }); return; }
+      if (count.who === 'op' && count.n >= 10) { count = null; state = 'end'; setTimeout(() => endFight(true, 'KO 勝！'), 900); return; }
+      if (count.who === 'me' && count.n >= 10) { count = null; state = 'end'; setTimeout(() => endFight(false, '被 KO 了'), 900); return; }
+    }
+    if (count && count.who === 'me' && mashN >= count.need) { me.hp = 100 * (.55 - me.downs * .08); count = null; me.hurt = .5; fx.push({ s: '站起來了！', x: 200, y: 330, t: 1, col: '#86efac' }); sCrowd(.25, 1); }
+    return;
+  }
+  if (state !== 'fight') return;
+  rt -= dt;
+  if (rt <= 0) { roundEnd(); return; }
+  // 玩家
+  me.cool = Math.max(0, me.cool - dt); me.hurt = Math.max(0, me.hurt - dt);
+  if (me.punch) { me.punch.t += dt; if (!me.punch.done && me.punch.t >= me.punch.hitAt) landPunch(); if (me.punch && me.punch.t >= me.punch.dur) me.punch = null; }
+  if (me.dodge) { me.dodge.t += dt; if (me.dodge.t >= me.dodge.dur) me.dodge = null; }
+  if (me.guard) me.st = Math.max(0, me.st - 7 * dt); else if (!me.punch) me.st = Math.min(100, me.st + 20 * dt);
+  // 對手
+  op.hurt = Math.max(0, op.hurt - dt); op.open = Math.max(0, op.open - dt); op.dodge = Math.max(0, op.dodge - dt);
+  if (op.state === 'down') return;
+  if (op.hurt > 0 && op.state !== 'windup') return;
+  op.t += dt;
+  if (op.state === 'idle') { op.think -= dt; if (op.think <= 0) oppDecide(); }
+  else if (op.state === 'guard') { op.guardT -= dt; if (op.guardT <= 0) { op.state = 'idle'; op.think = .3 + Math.random() * .5; } }
+  else if (op.state === 'windup') {
+    if (O.fake && !op.faked && op.t > op.wind * .55 && Math.random() < O.fake) { op.faked = true; op.side = op.side === 'L' ? 'R' : 'L'; op.t = op.wind * .45; fx.push({ s: '假動作！', x: 200, y: 110, t: .6, col: '#c4b5fd' }); }
+    if (op.t >= op.wind) oppStrike();
+  }
+  else if (op.state === 'strike') {
+    if (op.t >= .22) {
+      op.comboLeft--;
+      if (op.comboLeft > 0 && op.open <= 0) oppWindup();
+      else { op.state = 'idle'; op.comboStarted = false; op.think = O.think[0] + Math.random() * (O.think[1] - O.think[0]) + (op.open > 0 ? .5 : 0); }
+    }
+  }
+  crowdT -= dt; if (crowdT <= 0) { crowdT = 3 + Math.random() * 3; sCrowd(.05, 1.2); }
+}
+function roundEnd() {
+  sBell(2);
+  if (round >= 3) {
+    const myScore = stats.landed * 2 + stats.counters * 3 + stats.kd * 10 - stats.oLanded * 2 - me.downs * 10;
+    state = 'end'; setTimeout(() => endFight(myScore > 0, myScore > 0 ? '判定勝！' : '判定敗'), 1200); return;
+  }
+  round++; rt = ROUND_T; state = 'break'; introT = 2.4;
+  me.hp = Math.min(100, me.hp + 20); me.st = 100; op.hp = Math.min(op.max, op.hp + op.max * .15); op.state = 'idle'; op.think = 1.5;
+  me.punch = me.dodge = null; me.guard = false;
+}
+
+/* 操作 */
+const btn = { L: { down: false }, R: { down: false } };
+function punchBtn(id, hand) {
+  const b = $(id), s = btn[hand];
+  b.addEventListener('pointerdown', e => {
+    initAudio(); e.preventDefault(); try { b.setPointerCapture(e.pointerId); } catch (er) {}
+    s.down = true; s.y = e.clientY; s.t = performance.now(); s.up = false; b.classList.add('on');
+    if (count) { mash(); return; }
+    const other = btn[hand === 'L' ? 'R' : 'L'];
+    if (other.down) { setGuard(true); other.cancel = true; s.cancel = true; }
+  });
+  b.addEventListener('pointermove', e => { if (s.down && s.y - e.clientY > 25) s.up = true; });
+  const end = () => {
+    if (!s.down) return; s.down = false; b.classList.remove('on');
+    const other = btn[hand === 'L' ? 'R' : 'L'];
+    if (s.cancel) { s.cancel = false; if (!other.down) setGuard(false); return; }
+    if (performance.now() - s.t < 450) punch(hand, s.up ? 'upper' : 'jab');
+  };
+  b.addEventListener('pointerup', end); b.addEventListener('pointercancel', end);
+}
+punchBtn('bPL', 'L'); punchBtn('bPR', 'R');
+for (const [id, d] of [['bDL', -1], ['bDR', 1]]) {
+  const b = $(id);
+  b.addEventListener('pointerdown', e => { initAudio(); e.preventDefault(); b.classList.add('on'); if (count) mash(); else dodge(d); });
+  const off = () => b.classList.remove('on'); b.addEventListener('pointerup', off); b.addEventListener('pointercancel', off); b.addEventListener('pointerleave', off);
+}
+cv.addEventListener('pointerdown', () => { initAudio(); mash(); });
+addEventListener('keydown', e => {
+  if (e.repeat) return; initAudio();
+  if (count) { mash(); return; }
+  if (e.code === 'KeyA' || e.code === 'ArrowLeft') dodge(-1);
+  if (e.code === 'KeyD' || e.code === 'ArrowRight') dodge(1);
+  if (e.code === 'KeyJ') punch('L', 'jab'); if (e.code === 'KeyK') punch('R', 'jab');
+  if (e.code === 'KeyU') punch('L', 'upper'); if (e.code === 'KeyI') punch('R', 'upper');
+  if (e.code === 'Space') setGuard(true);
+});
+addEventListener('keyup', e => { if (e.code === 'Space') setGuard(false); });
+
+/* 繪圖 */
+function drawArena() {
+  const g = ctx.createRadialGradient(200, 120, 20, 200, 160, 380); g.addColorStop(0, '#3b2f5c'); g.addColorStop(1, '#07070d');
+  ctx.fillStyle = g; ctx.fillRect(-60, -60, W + 120, H + 120);
+  // 觀眾
+  for (let row = 0; row < 3; row++) for (let i = 0; i < 16; i++) {
+    const x = -40 + i * 32 + (row % 2) * 16, y = 150 + row * 22 + Math.sin(time * 3 + i + row) * (state === 'fight' ? 1.5 : 0);
+    ctx.fillStyle = `rgba(${30 + row * 15},${25 + row * 10},${50 + row * 10},1)`; ctx.beginPath(); ctx.arc(x, y, 11, 0, 7); ctx.fill(); ctx.fillRect(x - 13, y + 8, 26, 30);
+  }
+  if (Math.random() < .08) { ctx.fillStyle = 'rgba(255,255,255,.9)'; ctx.beginPath(); ctx.arc(Math.random() * W, 140 + Math.random() * 60, 3, 0, 7); ctx.fill(); }
+  // 擂台地板
+  ctx.fillStyle = '#1e3a8a'; ctx.beginPath(); ctx.moveTo(-60, H + 60); ctx.lineTo(60, 300); ctx.lineTo(340, 300); ctx.lineTo(W + 60, H + 60); ctx.fill();
+  ctx.fillStyle = 'rgba(255,255,255,.06)'; ctx.beginPath(); ctx.ellipse(200, 420, 160, 50, 0, 0, 7); ctx.fill();
+  // 繩子
+  const ropes = ['#ef4444', '#f8fafc', '#3b82f6'];
+  ropes.forEach((c, i) => { ctx.strokeStyle = c; ctx.lineWidth = 4; ctx.beginPath(); ctx.moveTo(-60, 210 + i * 30); ctx.quadraticCurveTo(200, 222 + i * 30, W + 60, 210 + i * 30); ctx.stroke(); });
+  ctx.fillStyle = '#9ca3af'; ctx.fillRect(18, 190, 10, 120); ctx.fillRect(W - 28, 190, 10, 120);
+  // 聚光燈
+  const sp = ctx.createRadialGradient(200, 0, 10, 200, 260, 300); sp.addColorStop(0, 'rgba(255,255,220,.14)'); sp.addColorStop(1, 'rgba(255,255,220,0)');
+  ctx.fillStyle = sp; ctx.fillRect(-60, -60, W + 120, H + 120);
+}
+function mix(hex, k) {   // k<1 變暗，k>1 變亮
+  const n = parseInt(hex.slice(1), 16); let r = n >> 16, g = n >> 8 & 255, b = n & 255;
+  if (k <= 1) { r *= k; g *= k; b *= k; } else { const t = k - 1; r += (255 - r) * t; g += (255 - g) * t; b += (255 - b) * t; }
+  return `rgb(${r | 0},${g | 0},${b | 0})`;
+}
+function shade(hex) { return mix(hex, .6); }
+/* 拳套：正面（對手）或背面（自己） */
+function glove(x, y, r, col, glow, flip, back) {
+  const s = flip ? -1 : 1;
+  if (glow) { const gg = ctx.createRadialGradient(x, y, r * .6, x, y, r * 1.7); gg.addColorStop(0, `rgba(250,204,21,${.55 + .25 * Math.sin(time * 30)})`); gg.addColorStop(1, 'rgba(250,204,21,0)'); ctx.fillStyle = gg; ctx.beginPath(); ctx.arc(x, y, r * 1.7, 0, 7); ctx.fill(); }
+  ctx.save(); ctx.translate(x, y); ctx.scale(s, 1);
+  // 護腕（袖口）
+  const cuffY = r * .78;
+  let cg = ctx.createLinearGradient(-r * .7, 0, r * .7, 0); cg.addColorStop(0, mix(col, .45)); cg.addColorStop(.45, mix(col, 1.05)); cg.addColorStop(1, mix(col, .4));
+  ctx.fillStyle = cg; ctx.beginPath(); ctx.roundRect(-r * .66, cuffY - r * .15, r * 1.32, r * .9, r * .18); ctx.fill();
+  ctx.fillStyle = '#f1f5f9'; ctx.fillRect(-r * .66, cuffY + r * .12, r * 1.32, r * .16);
+  ctx.fillStyle = 'rgba(0,0,0,.18)'; ctx.fillRect(-r * .66, cuffY + r * .26, r * 1.32, r * .04);
+  if (back) {   // 綁帶
+    ctx.strokeStyle = '#f8fafc'; ctx.lineWidth = Math.max(1.5, r * .045);
+    for (let i = 0; i < 3; i++) { const yy = cuffY + r * .34 + i * r * .13; ctx.beginPath(); ctx.moveTo(-r * .16, yy); ctx.lineTo(r * .16, yy + r * .1); ctx.moveTo(r * .16, yy); ctx.lineTo(-r * .16, yy + r * .1); ctx.stroke(); }
+  }
+  // 主體
+  const g = ctx.createRadialGradient(-r * .35, -r * .45, r * .08, 0, 0, r * 1.15);
+  g.addColorStop(0, mix(col, 1.55)); g.addColorStop(.18, mix(col, 1.12)); g.addColorStop(.55, col); g.addColorStop(.85, mix(col, .55)); g.addColorStop(1, mix(col, .35));
+  ctx.fillStyle = g; ctx.beginPath();
+  ctx.moveTo(-r * .62, r * .7);
+  ctx.bezierCurveTo(-r * 1.05, r * .35, -r * 1.08, -r * .55, -r * .55, -r * .92);
+  ctx.bezierCurveTo(-r * .15, -r * 1.12, r * .55, -r * 1.08, r * .82, -r * .7);
+  ctx.bezierCurveTo(r * 1.08, -r * .3, r * 1.02, r * .38, r * .62, r * .7);
+  ctx.closePath(); ctx.fill();
+  // 手指區摺痕
+  ctx.strokeStyle = 'rgba(0,0,0,.28)'; ctx.lineWidth = Math.max(1.2, r * .05);
+  ctx.beginPath(); if (back) { ctx.moveTo(-r * .7, -r * .2); ctx.quadraticCurveTo(0, -r * .02, r * .78, -r * .25); } else { ctx.moveTo(-r * .62, -r * .05); ctx.quadraticCurveTo(0, r * .18, r * .7, -r * .08); } ctx.stroke();
+  ctx.strokeStyle = 'rgba(255,255,255,.22)'; ctx.lineWidth = Math.max(1, r * .03); ctx.beginPath(); if (back) { ctx.moveTo(-r * .66, -r * .14); ctx.quadraticCurveTo(0, r * .04, r * .74, -r * .19); } else { ctx.moveTo(-r * .6, r * .01); ctx.quadraticCurveTo(0, r * .24, r * .68, -r * .02); } ctx.stroke();
+  // 縫線
+  ctx.setLineDash([r * .07, r * .06]); ctx.strokeStyle = 'rgba(0,0,0,.25)'; ctx.lineWidth = Math.max(.8, r * .025);
+  ctx.beginPath(); ctx.moveTo(-r * .55, r * .62); ctx.bezierCurveTo(-r * .92, r * .3, -r * .95, -r * .5, -r * .5, -r * .82); ctx.stroke(); ctx.setLineDash([]);
+  // 大拇指
+  const tg = ctx.createRadialGradient(r * .62, r * .02, r * .03, r * .7, r * .15, r * .5); tg.addColorStop(0, mix(col, 1.3)); tg.addColorStop(.6, mix(col, .85)); tg.addColorStop(1, mix(col, .45));
+  ctx.fillStyle = tg; ctx.beginPath(); ctx.ellipse(r * .7, r * .2, r * .26, r * .46, back ? .5 : -.35, 0, 7); ctx.fill();
+  ctx.strokeStyle = 'rgba(0,0,0,.2)'; ctx.lineWidth = Math.max(1, r * .03); ctx.stroke();
+  // 高光
+  ctx.fillStyle = 'rgba(255,255,255,.55)'; ctx.beginPath(); ctx.ellipse(-r * .38, -r * .58, r * .2, r * .09, -.6, 0, 7); ctx.fill();
+  ctx.fillStyle = 'rgba(255,255,255,.25)'; ctx.beginPath(); ctx.ellipse(-r * .7, r * .05, r * .06, r * .3, .1, 0, 7); ctx.fill();
+  if (back) { ctx.fillStyle = 'rgba(255,255,255,.85)'; ctx.font = `900 ${Math.round(r * .26)}px system-ui`; ctx.textAlign = 'center'; ctx.fillText('★', -r * .05, -r * .45); }
+  ctx.restore();
+}
+function limb(x1, y1, x2, y2, w1, w2, skin, outline) {
+  const a = Math.atan2(y2 - y1, x2 - x1), nx = -Math.sin(a), ny = Math.cos(a);
+  const g = ctx.createLinearGradient(x1 + nx * w1, y1 + ny * w1, x1 - nx * w1, y1 - ny * w1);
+  g.addColorStop(0, mix(skin, .6)); g.addColorStop(.35, mix(skin, 1.08)); g.addColorStop(.6, skin); g.addColorStop(1, mix(skin, .55));
+  ctx.fillStyle = g; ctx.beginPath();
+  ctx.moveTo(x1 + nx * w1, y1 + ny * w1); ctx.lineTo(x2 + nx * w2, y2 + ny * w2); ctx.arc(x2, y2, w2, a + Math.PI / 2, a - Math.PI / 2, true); ctx.lineTo(x1 - nx * w1, y1 - ny * w1); ctx.arc(x1, y1, w1, a - Math.PI / 2, a + Math.PI / 2, true); ctx.fill();
+  if (outline) { ctx.strokeStyle = 'rgba(70,35,15,.45)'; ctx.lineWidth = 2; ctx.stroke(); }
+}
+function drawOpponent() {
+  const k = O.big || 1, sk = O.skin;
+  let ox = 200 + Math.sin(time * 2.2) * 8 + op.dodgeDir * (op.dodge > 0 ? 70 * Math.sin(op.dodge / .35 * Math.PI) : 0), oy = Math.sin(time * 4.4) * 2, tilt = 0, headT = 0;
+  if (op.hurt > 0) { ox += op.hurtDir * 18 * op.hurt * 2; headT = op.hurtDir * .35 * op.hurt * 2; tilt = op.hurtDir * .08 * op.hurt * 2; if (op.hurtUp) oy -= 14 * op.hurt * 2; }
+  let fall = 0;
+  if (op.state === 'down' || state === 'end' && op.hp <= 0) fall = Math.min(1, (count ? count.n + count.t / .8 : 3) / 1.2);
+  ctx.save(); ctx.translate(ox, 290 + oy + fall * 260); ctx.rotate(tilt + fall * .5); ctx.scale(k, k);
+  // 拳套位置
+  let lg = { x: -58, y: -78, r: 34 }, rg = { x: 58, y: -78, r: 34 };
+  if (op.state === 'guard') { lg = { x: -26, y: -118, r: 38 }; rg = { x: 26, y: -118, r: 38 }; }
+  if (op.state === 'windup') { const g = op.side === 'L' ? lg : rg, s = op.side === 'L' ? -1 : 1, k2 = Math.min(1, op.t / op.wind); g.x += s * 46 * k2; g.y += 14 * k2; g.r = 36; }
+  if (op.state === 'strike') { const g = op.side === 'L' ? lg : rg, k2 = Math.min(1, op.t / .1); g.x *= (1 - k2); g.y += 70 * k2; g.r = 34 + 115 * k2; }
+  // 陰影
+  ctx.fillStyle = 'rgba(0,0,0,.35)'; ctx.beginPath(); ctx.ellipse(0, 150, 120, 22, 0, 0, 7); ctx.fill();
+  // 軀幹
+  let tg = ctx.createLinearGradient(-105, 0, 105, 0); tg.addColorStop(0, mix(sk, .5)); tg.addColorStop(.25, mix(sk, .9)); tg.addColorStop(.45, mix(sk, 1.12)); tg.addColorStop(.7, sk); tg.addColorStop(1, mix(sk, .5));
+  ctx.fillStyle = tg; ctx.beginPath();
+  ctx.moveTo(-70, 140); ctx.lineTo(-72, 70); ctx.bezierCurveTo(-78, 30, -96, 0, -100, -30); ctx.bezierCurveTo(-98, -50, -60, -58, -30, -66);
+  ctx.lineTo(30, -66); ctx.bezierCurveTo(60, -58, 98, -50, 100, -30); ctx.bezierCurveTo(96, 0, 78, 30, 72, 70); ctx.lineTo(70, 140); ctx.fill();
+  // 胸肌
+  ctx.strokeStyle = 'rgba(60,30,15,.28)'; ctx.lineWidth = 4; ctx.lineCap = 'round';
+  ctx.beginPath(); ctx.moveTo(-72, -10); ctx.bezierCurveTo(-55, 20, -15, 22, -3, 4); ctx.moveTo(72, -10); ctx.bezierCurveTo(55, 20, 15, 22, 3, 4); ctx.stroke();
+  ctx.fillStyle = 'rgba(255,255,255,.12)'; ctx.beginPath(); ctx.ellipse(-36, -20, 26, 14, -.2, 0, 7); ctx.ellipse(36, -20, 26, 14, .2, 0, 7); ctx.fill();
+  ctx.fillStyle = mix(sk, .55); ctx.beginPath(); ctx.arc(-42, 8, 3, 0, 7); ctx.arc(42, 8, 3, 0, 7); ctx.fill();
+  // 腹肌
+  ctx.strokeStyle = 'rgba(60,30,15,.22)'; ctx.lineWidth = 3;
+  ctx.beginPath(); ctx.moveTo(0, 18); ctx.lineTo(0, 118); for (const yy of [42, 70, 96]) { ctx.moveTo(-30, yy); ctx.quadraticCurveTo(-14, yy + 5, 0, yy); ctx.moveTo(30, yy); ctx.quadraticCurveTo(14, yy + 5, 0, yy); } ctx.stroke();
+  ctx.fillStyle = 'rgba(255,255,255,.1)'; for (const yy of [30, 56, 83]) { ctx.beginPath(); ctx.ellipse(-15, yy, 10, 8, 0, 0, 7); ctx.ellipse(15, yy, 10, 8, 0, 0, 7); ctx.fill(); }
+  // 汗水光澤
+  ctx.fillStyle = 'rgba(255,255,255,.35)'; ctx.beginPath(); ctx.ellipse(-60, -32, 10, 4, -.5, 0, 7); ctx.ellipse(52, 30, 3, 9, .2, 0, 7); ctx.fill();
+  // 短褲
+  let pg = ctx.createLinearGradient(-90, 0, 90, 0); pg.addColorStop(0, mix(O.trunks, .5)); pg.addColorStop(.4, mix(O.trunks, 1.2)); pg.addColorStop(1, mix(O.trunks, .55));
+  ctx.fillStyle = pg; ctx.beginPath(); ctx.moveTo(-76, 112); ctx.lineTo(76, 112); ctx.lineTo(84, 160); ctx.lineTo(-84, 160); ctx.fill();
+  ctx.fillStyle = O.belt ? '#facc15' : '#f8fafc'; ctx.fillRect(-77, 106, 154, 14);
+  if (O.belt) { const bg = ctx.createRadialGradient(-4, 108, 2, 0, 113, 22); bg.addColorStop(0, '#fff7c2'); bg.addColorStop(.5, '#facc15'); bg.addColorStop(1, '#a16207'); ctx.fillStyle = bg; ctx.beginPath(); ctx.ellipse(0, 113, 26, 17, 0, 0, 7); ctx.fill(); ctx.strokeStyle = '#78350f'; ctx.lineWidth = 2; ctx.stroke(); }
+  ctx.fillStyle = 'rgba(0,0,0,.18)'; ctx.fillRect(-70, 128, 4, 32); ctx.fillRect(66, 128, 4, 32);
+  // 手臂（肩→手肘→拳套）
+  const arm = (side, g) => {
+    const sx = side * 90, sy = -34;
+    const wx = g.x, wy = g.y + g.r * 1.1, ww = g.r * .48;          // 手腕插進護腕
+    const ex = g.x + side * (g.r > 60 ? 40 : 26), ey = Math.max(wy + 60, 34);   // 手肘收在身體前
+    limb(sx, sy, ex, ey, 25, 19, sk, true);
+    const dg = ctx.createRadialGradient(sx - side * 8, sy - 12, 4, sx, sy, 32); dg.addColorStop(0, mix(sk, 1.25)); dg.addColorStop(.6, sk); dg.addColorStop(1, mix(sk, .6));
+    ctx.fillStyle = dg; ctx.beginPath(); ctx.ellipse(sx - side * 2, sy + 2, 26, 25, 0, 0, 7); ctx.fill();
+    ctx.save(); ctx.globalAlpha = .28; ctx.translate(side * -7, 8); limb(ex, ey, wx, wy, 19, ww, '#3b1d0e'); ctx.restore();
+    limb(ex, ey, wx, wy, 19, ww, sk, true);
+    ctx.fillStyle = 'rgba(255,255,255,.18)'; ctx.beginPath(); ctx.ellipse((ex + wx) / 2 - side * 5, (ey + wy) / 2, 4, Math.abs(ey - wy) * .3, 0, 0, 7); ctx.fill();
+  };
+  arm(-1, lg); arm(1, rg);
+  // 脖子
+  let ng = ctx.createLinearGradient(-26, 0, 26, 0); ng.addColorStop(0, mix(sk, .55)); ng.addColorStop(.5, sk); ng.addColorStop(1, mix(sk, .55));
+  ctx.fillStyle = ng; ctx.beginPath(); ctx.moveTo(-27, -62); ctx.lineTo(-24, -92); ctx.lineTo(24, -92); ctx.lineTo(27, -62); ctx.quadraticCurveTo(0, -54, -27, -62); ctx.fill();
+  ctx.strokeStyle = 'rgba(60,30,15,.25)'; ctx.lineWidth = 2.5; ctx.beginPath(); ctx.moveTo(-18, -88); ctx.lineTo(-6, -62); ctx.moveTo(18, -88); ctx.lineTo(6, -62); ctx.stroke();
+  // 頭
+  ctx.save(); ctx.translate(0, -118); ctx.rotate(headT);
+  drawHead(sk, op.hurt > 0 || op.state === 'down', op.state === 'windup' || op.state === 'strike');
+  ctx.restore();
+  // 拳套（防守時擋在臉前）
+  glove(lg.x, lg.y, lg.r, O.glove, op.state === 'windup' && op.side === 'L', false, false);
+  glove(rg.x, rg.y, rg.r, O.glove, op.state === 'windup' && op.side === 'R', true, false);
+  ctx.restore();
+  if (op.open > 0 && state === 'fight') { ctx.fillStyle = `rgba(134,239,172,${.5 + .4 * Math.sin(time * 25)})`; ctx.font = '900 18px system-ui'; ctx.textAlign = 'center'; ctx.fillText('▼ 現在打！', ox, 112); }
+}
+function drawHead(sk, dazed, angry) {
+  // 耳朵
+  for (const s of [-1, 1]) { const eg = ctx.createRadialGradient(s * 47, 2, 2, s * 47, 4, 14); eg.addColorStop(0, mix(sk, .7)); eg.addColorStop(1, mix(sk, .95)); ctx.fillStyle = eg; ctx.beginPath(); ctx.ellipse(s * 46, 2, 10, 16, s * .15, 0, 7); ctx.fill(); ctx.strokeStyle = 'rgba(80,40,20,.3)'; ctx.lineWidth = 2; ctx.beginPath(); ctx.arc(s * 46, 2, 6, s > 0 ? -1.2 : Math.PI - 1.9, s > 0 ? 1.2 : Math.PI + 1.9); ctx.stroke(); }
+  // 臉型
+  const fg = ctx.createRadialGradient(-14, -18, 6, 0, 4, 66); fg.addColorStop(0, mix(sk, 1.15)); fg.addColorStop(.55, sk); fg.addColorStop(1, mix(sk, .62));
+  ctx.fillStyle = fg; ctx.beginPath();
+  ctx.moveTo(-44, -18); ctx.bezierCurveTo(-46, -62, 46, -62, 44, -18);
+  ctx.bezierCurveTo(46, 12, 40, 34, 26, 48); ctx.quadraticCurveTo(0, 64, -26, 48); ctx.bezierCurveTo(-40, 34, -46, 12, -44, -18); ctx.fill();
+  // 下顎陰影
+  ctx.fillStyle = 'rgba(70,35,15,.18)'; ctx.beginPath(); ctx.moveTo(-36, 28); ctx.quadraticCurveTo(-30, 50, 0, 58); ctx.quadraticCurveTo(30, 50, 36, 28); ctx.quadraticCurveTo(0, 50, -36, 28); ctx.fill();
+  if (O.beard) { ctx.fillStyle = mix(O.hair, 1.1); ctx.beginPath(); ctx.moveTo(-42, 0); ctx.bezierCurveTo(-44, 50, -20, 66, 0, 66); ctx.bezierCurveTo(20, 66, 44, 50, 42, 0); ctx.bezierCurveTo(30, 30, 16, 26, 0, 30); ctx.bezierCurveTo(-16, 26, -30, 30, -42, 0); ctx.fill(); }
+  else { ctx.fillStyle = 'rgba(40,30,30,.08)'; ctx.beginPath(); ctx.ellipse(0, 36, 30, 18, 0, 0, 7); ctx.fill(); }
+  // 頭髮
+  const hg = ctx.createLinearGradient(0, -62, 0, -24); hg.addColorStop(0, mix(O.hair, 1.35)); hg.addColorStop(1, O.hair);
+  ctx.fillStyle = hg; ctx.beginPath(); ctx.moveTo(-45, -18); ctx.bezierCurveTo(-50, -66, 50, -66, 45, -18); ctx.bezierCurveTo(36, -36, 20, -42, 0, -42); ctx.bezierCurveTo(-20, -42, -36, -36, -45, -18); ctx.fill();
+  ctx.strokeStyle = mix(O.hair, 1.6); ctx.lineWidth = 1.2; ctx.globalAlpha = .5; for (let i = -3; i <= 3; i++) { ctx.beginPath(); ctx.moveTo(i * 9, -50); ctx.quadraticCurveTo(i * 11 + 3, -45, i * 12, -40); ctx.stroke(); } ctx.globalAlpha = 1;
+  if (O.band) { const bg = ctx.createLinearGradient(0, -44, 0, -32); bg.addColorStop(0, mix(O.band, 1.2)); bg.addColorStop(1, mix(O.band, .7)); ctx.fillStyle = bg; ctx.beginPath(); ctx.moveTo(-46, -30); ctx.quadraticCurveTo(0, -46, 46, -30); ctx.lineTo(45, -20); ctx.quadraticCurveTo(0, -36, -45, -20); ctx.fill(); }
+  // 眉毛
+  ctx.fillStyle = mix(O.hair, .9);
+  const brow = (s) => { ctx.beginPath(); const y0 = angry ? -6 : -12, y1 = angry ? -16 : -15; ctx.moveTo(s * 8, y0); ctx.quadraticCurveTo(s * 20, y1 - 4, s * 34, y1 + 2); ctx.lineTo(s * 33, y1 + 6); ctx.quadraticCurveTo(s * 20, y1 + 1, s * 8, y0 + 5); ctx.fill(); };
+  brow(-1); brow(1);
+  // 眼睛
+  for (const s of [-1, 1]) {
+    const ex = s * 19, ey = 0;
+    ctx.fillStyle = 'rgba(70,35,15,.2)'; ctx.beginPath(); ctx.ellipse(ex, ey - 2, 13, 8, 0, 0, 7); ctx.fill();
+    if (dazed) { ctx.strokeStyle = '#3b1d0e'; ctx.lineWidth = 3; ctx.beginPath(); ctx.moveTo(ex - 9, ey - 3); ctx.quadraticCurveTo(ex, ey + 3, ex + 9, ey - 3); ctx.stroke(); continue; }
+    ctx.fillStyle = '#f8fafc'; ctx.beginPath(); ctx.moveTo(ex - 11, ey); ctx.quadraticCurveTo(ex, ey - 8, ex + 11, ey); ctx.quadraticCurveTo(ex, ey + 6, ex - 11, ey); ctx.fill();
+    ctx.fillStyle = '#5b3a1e'; ctx.beginPath(); ctx.arc(ex, ey - .5, 4.8, 0, 7); ctx.fill();
+    ctx.fillStyle = '#0b0b0b'; ctx.beginPath(); ctx.arc(ex, ey - .5, 2.3, 0, 7); ctx.fill();
+    ctx.fillStyle = '#fff'; ctx.beginPath(); ctx.arc(ex - 1.6, ey - 2.2, 1.2, 0, 7); ctx.fill();
+    ctx.strokeStyle = '#2b1608'; ctx.lineWidth = 2.2; ctx.beginPath(); ctx.moveTo(ex - 12, ey); ctx.quadraticCurveTo(ex, ey - (angry ? 6 : 9), ex + 12, ey - 1); ctx.stroke();
+  }
+  // 鼻子
+  ctx.strokeStyle = 'rgba(80,40,20,.35)'; ctx.lineWidth = 2; ctx.beginPath(); ctx.moveTo(-5, 2); ctx.quadraticCurveTo(-8, 18, -9, 22); ctx.stroke();
+  ctx.fillStyle = 'rgba(255,255,255,.25)'; ctx.beginPath(); ctx.ellipse(1, 12, 2.5, 8, 0, 0, 7); ctx.fill();
+  ctx.fillStyle = mix(sk, .8); ctx.beginPath(); ctx.ellipse(0, 22, 11, 6, 0, 0, 7); ctx.fill();
+  ctx.fillStyle = 'rgba(50,20,10,.55)'; ctx.beginPath(); ctx.ellipse(-5, 24, 3, 1.8, .3, 0, 7); ctx.ellipse(5, 24, 3, 1.8, -.3, 0, 7); ctx.fill();
+  // 顴骨
+  ctx.fillStyle = 'rgba(70,35,15,.12)'; ctx.beginPath(); ctx.ellipse(-30, 14, 9, 14, .3, 0, 7); ctx.ellipse(30, 14, 9, 14, -.3, 0, 7); ctx.fill();
+  if (O.stache) { ctx.fillStyle = O.hair; ctx.beginPath(); ctx.moveTo(-20, 33); ctx.quadraticCurveTo(-10, 25, 0, 30); ctx.quadraticCurveTo(10, 25, 20, 33); ctx.quadraticCurveTo(10, 32, 0, 34); ctx.quadraticCurveTo(-10, 32, -20, 33); ctx.fill(); }
+  // 嘴巴
+  if (angry) {
+    ctx.fillStyle = '#7f1d1d'; ctx.beginPath(); ctx.roundRect(-14, 34, 28, 11, 5); ctx.fill();
+    ctx.fillStyle = mix(O.glove, 1.2); ctx.beginPath(); ctx.roundRect(-12, 36, 24, 7, 3); ctx.fill();   // 護齒
+    ctx.strokeStyle = 'rgba(0,0,0,.25)'; ctx.lineWidth = 1; ctx.beginPath(); ctx.moveTo(-12, 39.5); ctx.lineTo(12, 39.5); ctx.stroke();
+  } else if (dazed) {
+    ctx.fillStyle = '#5b1414'; ctx.beginPath(); ctx.ellipse(2, 40, 9, 7, .2, 0, 7); ctx.fill();
+    ctx.fillStyle = mix(O.glove, 1.2); ctx.fillRect(-5, 35, 12, 4);
+  } else {
+    ctx.fillStyle = mix(sk, .62); ctx.beginPath(); ctx.moveTo(-13, 38); ctx.quadraticCurveTo(0, 34, 13, 38); ctx.quadraticCurveTo(0, 40, -13, 38); ctx.fill();
+    ctx.fillStyle = mix(sk, .78); ctx.beginPath(); ctx.moveTo(-11, 39); ctx.quadraticCurveTo(0, 46, 11, 39); ctx.quadraticCurveTo(0, 41, -11, 39); ctx.fill();
+  }
+  // 受傷：瘀青、汗珠
+  if (op.downs > 0 || op.hp < op.max * .5) { ctx.fillStyle = 'rgba(126,34,206,.22)'; ctx.beginPath(); ctx.ellipse(-22, 4, 12, 9, 0, 0, 7); ctx.fill(); }
+  if (op.hp < op.max * .3) { ctx.fillStyle = 'rgba(126,34,206,.22)'; ctx.beginPath(); ctx.ellipse(26, 18, 10, 9, 0, 0, 7); ctx.fill(); }
+  if (dazed) { ctx.fillStyle = 'rgba(191,219,254,.9)'; for (const [sx, sy] of [[-52, -20], [54, -8], [48, -36]]) { ctx.beginPath(); ctx.moveTo(sx, sy - 6); ctx.quadraticCurveTo(sx + 4, sy + 2, sx, sy + 4); ctx.quadraticCurveTo(sx - 4, sy + 2, sx, sy - 6); ctx.fill(); } }
+  ctx.fillStyle = 'rgba(255,255,255,.3)'; ctx.beginPath(); ctx.ellipse(-20, -30, 10, 4, -.3, 0, 7); ctx.fill();
+}
+function drawMyGloves() {
+  const p = me.punch;
+  for (const hand of ['L', 'R']) {
+    const s = hand === 'L' ? -1 : 1;
+    let x = 200 + s * 108, y = 530, r = 70;
+    if (me.guard) { x = 200 + s * 50; y = 448; r = 80; }
+    if (p && p.hand === hand) {
+      const kk = Math.sin(Math.min(1, p.t / p.dur) * Math.PI);
+      if (p.kind === 'jab') { x += (200 - x) * .85 * kk; y -= 300 * kk; r -= 34 * kk; }
+      else { x += (200 - x) * .8 * kk; y -= 340 * kk + (kk < .5 ? -40 * kk : 0); r -= 30 * kk; }
+    } else if (!me.guard) y += Math.sin(time * 4 + (s > 0 ? 1 : 0)) * 6;
+    // 前臂
+    limb(x + s * 34, H + 80, x, y + r * 1.15, 44, r * .5, '#e0ac82', true);
+    glove(x, y, r, '#c81e1e', false, s < 0, true);
+  }
+}
+function bar(x, y, w, h, v, col, back = '#0008', right = false) {
+  ctx.fillStyle = back; ctx.fillRect(x, y, w, h); ctx.fillStyle = col;
+  const ww = w * Math.max(0, Math.min(1, v)); ctx.fillRect(right ? x + w - ww : x, y, ww, h);
+  ctx.strokeStyle = '#fff6'; ctx.lineWidth = 1; ctx.strokeRect(x, y, w, h);
+}
+function drawHUD() {
+  ctx.font = '700 12px system-ui'; ctx.textAlign = 'left'; ctx.fillStyle = '#fff'; ctx.fillText('你', 10, 18);
+  bar(10, 24, 150, 13, me.hp / 100, me.hp < 30 ? '#ef4444' : '#22c55e');
+  bar(10, 40, 150, 6, me.st / 100, '#facc15');
+  ctx.textAlign = 'right'; ctx.fillText(`${O.ic} ${O.name}`, W - 10, 18);
+  bar(W - 160, 24, 150, 13, op.hp / op.max, op.hp / op.max < .3 ? '#ef4444' : '#f97316', '#0008', true);
+  ctx.textAlign = 'center'; ctx.font = '900 13px system-ui'; ctx.fillStyle = '#fde047'; ctx.fillText(`第 ${round} 回合`, 200, 17);
+  ctx.font = '900 20px system-ui'; ctx.fillStyle = rt < 10 ? '#f87171' : '#fff'; ctx.fillText(Math.max(0, Math.ceil(rt)), 200, 40);
+  // 倒地次數
+  ctx.font = '11px system-ui'; ctx.textAlign = 'left'; ctx.fillStyle = '#fca5a5'; ctx.fillText('💥'.repeat(me.downs), 10, 60); ctx.textAlign = 'right'; ctx.fillText('💥'.repeat(op.downs), W - 10, 44);
+  if (me.st < 15) { ctx.textAlign = 'left'; ctx.fillStyle = '#facc15'; ctx.font = '700 11px system-ui'; ctx.fillText('體力不足！', 164, 47); }
+}
+function draw() {
+  ctx.setTransform(scale, 0, 0, scale, 0, 0);
+  const sx = shake > 0 ? (Math.random() - .5) * 26 * shake : 0, sy = shake > 0 ? (Math.random() - .5) * 26 * shake : 0;
+  let dx = 0, rot = 0;
+  if (me.dodge) { const k = Math.sin(me.dodge.t / me.dodge.dur * Math.PI); dx = -me.dodge.dir * 90 * k; rot = me.dodge.dir * .08 * k; }
+  ctx.save(); ctx.translate(200 + sx + dx, 280 + sy); ctx.rotate(rot); ctx.translate(-200, -280);
+  drawArena();
+  if (state !== 'menu') drawOpponent();
+  ctx.restore();
+  if (state !== 'menu') drawMyGloves();
+  for (const f of fx) {
+    if (f.star) { ctx.fillStyle = `rgba(253,224,71,${f.t * 2})`; ctx.font = '16px system-ui'; ctx.textAlign = 'center'; ctx.fillText('✦', f.x, f.y); continue; }
+    ctx.globalAlpha = Math.min(1, f.t * 2); ctx.font = f.big ? '900 34px system-ui' : '900 18px system-ui'; ctx.textAlign = 'center'; ctx.lineWidth = 6; ctx.strokeStyle = '#000'; ctx.strokeText(f.s, f.x, f.y - (1 - f.t) * 12); ctx.fillStyle = f.col; ctx.fillText(f.s, f.x, f.y - (1 - f.t) * 12); ctx.globalAlpha = 1;
+  }
+  if (flashA > 0) { ctx.fillStyle = `rgba(255,${me.hp <= 0 ? 0 : 255},${me.hp <= 0 ? 0 : 255},${flashA * .6})`; ctx.fillRect(0, 0, W, H); const v = ctx.createRadialGradient(200, 280, 120, 200, 280, 360); v.addColorStop(0, 'rgba(220,38,38,0)'); v.addColorStop(1, `rgba(220,38,38,${flashA})`); ctx.fillStyle = v; ctx.fillRect(0, 0, W, H); }
+  if (state !== 'menu') drawHUD();
+  if (count) {
+    ctx.fillStyle = 'rgba(0,0,0,.45)'; ctx.fillRect(0, 170, W, 150);
+    ctx.font = '900 80px system-ui'; ctx.textAlign = 'center'; ctx.fillStyle = '#fde047'; ctx.fillText(count.n || '', 200, 270);
+    ctx.font = '700 16px system-ui'; ctx.fillStyle = '#fff';
+    if (count.who === 'me') { ctx.fillText(`快連點畫面站起來！ ${Math.min(mashN, count.need)}/${count.need}`, 200, 302); bar(100, 308, 200, 8, mashN / count.need, '#22c55e'); }
+    else ctx.fillText(`${O.name} 倒地！`, 200, 302);
+  }
+  if (state === 'intro' || state === 'break') {
+    ctx.fillStyle = 'rgba(0,0,0,.5)'; ctx.fillRect(0, 200, W, 110);
+    ctx.font = '900 34px system-ui'; ctx.textAlign = 'center'; ctx.fillStyle = '#fde047'; ctx.fillText(`第 ${round} 回合`, 200, 250);
+    ctx.font = '700 16px system-ui'; ctx.fillStyle = '#fff'; ctx.fillText(state === 'intro' ? `VS ${O.ic} ${O.name}` : '休息一下，體力恢復', 200, 284);
+  }
+}
+
+let last = performance.now(), fast = 1;
+function loop(now) { const dt = Math.min(.033, (now - last) / 1000); last = now; for (let i = 0; i < fast; i++) update(dt); draw(); requestAnimationFrame(loop); }
+resize(); buildMenu(); requestAnimationFrame(loop);
+window.__bx = { me, op, get state() { return state; }, get round() { return round; }, get rt() { return rt; }, get count() { return count; }, get stats() { return stats; }, punch, dodge, setGuard, mash, startFight, set fast(v) { fast = v; } };
+})();
+</script>
+</body>
+</html>
