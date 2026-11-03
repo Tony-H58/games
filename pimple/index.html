@@ -1,0 +1,398 @@
+<!DOCTYPE html>
+<html lang="zh-Hant">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1,maximum-scale=1,user-scalable=no">
+<title>擠痘痘</title>
+<style>
+  html,body{margin:0;height:100%;background:#fde8e4;color:#4a2c2a;font-family:system-ui,-apple-system,"PingFang TC","Noto Sans TC",sans-serif;overflow:hidden;touch-action:none;user-select:none;-webkit-user-select:none}
+  #hud{max-width:520px;margin:0 auto;display:flex;justify-content:space-between;align-items:center;padding:8px 14px 2px;font-size:11px}
+  #hud b{display:block;font-size:21px;font-variant-numeric:tabular-nums;color:#d6336c}
+  #tip{text-align:center;font-size:13px;height:18px;color:#a0526b}
+  #wrap{position:relative;display:flex;justify-content:center}
+  canvas{display:block;touch-action:none}
+  .ov{position:absolute;inset:0;display:flex;align-items:center;justify-content:center}
+  .box{background:#fffaf8f2;border:2px solid #f4a7b9;border-radius:18px;padding:20px;width:min(310px,86%);text-align:center;box-shadow:0 8px 30px #d6336c33}
+  .box h2{margin:0 0 6px;font-size:28px;color:#d6336c}
+  .box p{font-size:13px;line-height:1.7;margin:6px 0 12px;text-align:left}
+  .go{width:100%;background:#d6336c;color:#fff;border:0;border-radius:12px;padding:13px;font-size:17px;font-weight:800}
+  .stats{display:grid;grid-template-columns:1fr 1fr;gap:6px;margin:8px 0 14px}
+  .stats div{background:#fde8e4;border-radius:10px;padding:7px;font-size:11px}
+  .stats b{display:block;font-size:20px;color:#d6336c}
+  #rank{font-size:40px;margin:2px 0}
+  [hidden]{display:none!important}
+</style>
+</head>
+<body>
+<div id="hud">
+  <div>時間<b id="hTime">60</b></div>
+  <div>分數<b id="hScore">0</b></div>
+  <div>連擊<b id="hCombo">0</b></div>
+  <div style="text-align:right">痘疤<b id="hScar">0</b></div>
+</div>
+<div id="tip"></div>
+<div id="wrap">
+  <canvas id="c"></canvas>
+  <div class="ov" id="menu"><div class="box">
+    <h2>擠痘痘</h2>
+    <p>🔴 痘痘會慢慢<b>變熟</b>（冒出白頭）才能擠。<br>
+       👆 <b>按住</b>痘痘加壓，圈圈指針進到<b>綠色區</b>時<b>放開</b>就「啵」！<br>
+       ⚠️ 太早放沒用，按太久會<b>留疤</b>；還沒熟就擠也會留疤。<br>
+       ⚫ 黑頭要<b>兩指往中間捏</b>（電腦可雙擊）。</p>
+    <button class="go" id="start">開始擠！</button>
+  </div></div>
+  <div class="ov" id="over" hidden><div class="box">
+    <div id="rank"></div><h2 id="oTitle"></h2>
+    <div class="stats">
+      <div>分數<b id="sScore"></b></div><div>擠掉<b id="sPop"></b></div>
+      <div>完美<b id="sPerfect"></b></div><div>痘疤<b id="sScar"></b></div>
+      <div>最高連擊<b id="sCombo"></b></div><div>最高分<b id="sBest"></b></div>
+    </div>
+    <button class="go" id="again">再來一局</button>
+  </div></div>
+</div>
+<script>
+(() => {
+const W = 400, H = 600, GAME_T = 60;
+const cv = document.getElementById('c'), ctx = cv.getContext('2d');
+let scale = 1;
+function resize() {
+  const top = document.getElementById('hud').offsetHeight + document.getElementById('tip').offsetHeight;
+  const s = Math.min((innerWidth - 6) / W, (innerHeight - top - 8) / H), d = window.devicePixelRatio || 1;
+  cv.style.width = W * s + 'px'; cv.style.height = H * s + 'px';
+  cv.width = Math.round(W * s * d); cv.height = Math.round(H * s * d); scale = s * d;
+}
+addEventListener('resize', resize); resize();
+
+/* 音效 */
+let ac = null, squish = null;
+function initAudio() { if (!ac) { try { ac = new (window.AudioContext || window.webkitAudioContext)(); } catch (e) {} } else if (ac.state === 'suspended') ac.resume(); }
+function pop(big) {
+  if (!ac) return; const t = ac.currentTime, o = ac.createOscillator(), g = ac.createGain();
+  o.type = 'sine'; o.frequency.setValueAtTime(big ? 700 : 900, t); o.frequency.exponentialRampToValueAtTime(big ? 120 : 200, t + .12);
+  g.gain.setValueAtTime(.25, t); g.gain.exponentialRampToValueAtTime(.0001, t + .16); o.connect(g).connect(ac.destination); o.start(t); o.stop(t + .17);
+}
+function ouch() { if (!ac) return; const t = ac.currentTime, o = ac.createOscillator(), g = ac.createGain(); o.type = 'triangle'; o.frequency.setValueAtTime(500, t); o.frequency.exponentialRampToValueAtTime(260, t + .3); g.gain.setValueAtTime(.12, t); g.gain.exponentialRampToValueAtTime(.0001, t + .32); o.connect(g).connect(ac.destination); o.start(t); o.stop(t + .33); }
+function squishOn(on) {
+  if (!ac) return;
+  if (on && !squish) {
+    const n = ac.sampleRate, buf = ac.createBuffer(1, n, ac.sampleRate), d = buf.getChannelData(0);
+    for (let i = 0; i < n; i++) d[i] = Math.random() * 2 - 1;
+    const src = ac.createBufferSource(), f = ac.createBiquadFilter(), g = ac.createGain();
+    src.buffer = buf; src.loop = true; f.type = 'lowpass'; f.frequency.value = 300; g.gain.value = 0;
+    src.connect(f).connect(g).connect(ac.destination); src.start(); squish = { src, g, f };
+  } else if (!on && squish) { squish.src.stop(); squish = null; }
+}
+const buzz = ms => { try { navigator.vibrate && navigator.vibrate(ms); } catch (e) {} };
+
+/* 臉與痘痘 */
+const FACE = { x: 200, y: 305, rx: 150, ry: 192 };
+const ZONES = [
+  { x0: 125, x1: 275, y0: 160, y1: 225 },  // 額頭
+  { x0: 85,  x1: 145, y0: 330, y1: 410 },  // 左臉頰
+  { x0: 255, x1: 315, y0: 330, y1: 410 },  // 右臉頰
+  { x0: 186, x1: 214, y0: 300, y1: 345 },  // 鼻子
+  { x0: 165, x1: 235, y0: 455, y1: 480 },  // 下巴
+  { x0: 150, x1: 250, y0: 228, y1: 245 },  // 眉心上方
+];
+const TYPES = {
+  white: { r: 5,  ripen: 1.2, lo: .35, hi: .75, pts: 10, name: '白頭粉刺' },
+  red:   { r: 8,  ripen: 3.0, lo: .65, hi: 1.15, pts: 20, name: '紅腫痘' },
+  big:   { r: 12, ripen: 4.5, lo: 1.1, hi: 1.75, pts: 40, name: '大膿包' },
+  black: { r: 4,  ripen: 0,   lo: 0,  hi: 0,  pts: 30, name: '黑頭' },
+};
+let pimples = [], scars = [], drops = [], fx = [], state = 'menu', t = 0, spawnT = 0;
+let score = 0, pops = 0, perfects = 0, scarN = 0, combo = 0, maxCombo = 0, wince = 0, ouchT = 0, blinkT = 2;
+let best = 0; try { best = +localStorage.getItem('pimpleBest') || 0; } catch (e) {}
+let press = null;   // { p: pimple, v: 壓力 }
+
+function setTip(s) { document.getElementById('tip').textContent = s; }
+function hud() {
+  document.getElementById('hTime').textContent = Math.max(0, Math.ceil(GAME_T - t));
+  document.getElementById('hScore').textContent = score;
+  document.getElementById('hCombo').textContent = combo;
+  document.getElementById('hScar').textContent = scarN;
+}
+function startGame() {
+  pimples = []; scars = []; drops = []; fx = []; t = 0; spawnT = .2; score = pops = perfects = scarN = combo = maxCombo = 0; press = null;
+  state = 'play'; document.getElementById('menu').hidden = true; document.getElementById('over').hidden = true;
+  for (let i = 0; i < 3; i++) spawn(); hud(); setTip('按住痘痘，指針到綠色區就放開！');
+}
+function spawn() {
+  for (let k = 0; k < 20; k++) {
+    const z = ZONES[(Math.random() * ZONES.length) | 0];
+    const x = z.x0 + Math.random() * (z.x1 - z.x0), y = z.y0 + Math.random() * (z.y1 - z.y0);
+    if (pimples.some(p => Math.hypot(p.x - x, p.y - y) < 34) || scars.some(s => Math.hypot(s.x - x, s.y - y) < 14)) continue;
+    const r = Math.random(), late = t / GAME_T;
+    const type = r < .22 ? 'black' : r < .45 ? 'white' : r < .78 - late * .1 ? 'red' : 'big';
+    pimples.push({ x, y, type, T: TYPES[type], age: 0, ripe: type === 'black' ? 1 : 0, pulse: Math.random() * 6 });
+    return;
+  }
+}
+
+/* 結果判定 */
+function finishPress(p, v) {
+  const T = p.T, unripe = p.ripe < 1;
+  squishOn(false);
+  if (v < T.lo && !unripe) { fx.push({ x: p.x, y: p.y - 22, t: .8, s: '還不夠力…', col: '#a0526b' }); return; }
+  if (v < T.lo * .6 && unripe) { fx.push({ x: p.x, y: p.y - 22, t: .8, s: '還沒熟，先別擠', col: '#a0526b' }); return; }
+  if (unripe || v > T.hi) { scarIt(p, unripe ? '還沒熟就擠！' : '太用力了！'); return; }
+  // 成功
+  const mid = (T.lo + T.hi) / 2, perfect = Math.abs(v - mid) < (T.hi - T.lo) * .2;
+  popIt(p, perfect);
+}
+function popIt(p, perfect) {
+  pimples = pimples.filter(q => q !== p);
+  pops++; combo++; maxCombo = Math.max(maxCombo, combo); if (perfect) perfects++;
+  const mult = (perfect ? 1.5 : 1) * (1 + Math.min(1, Math.floor(combo / 4) * .25));
+  const gain = Math.round(p.T.pts * mult); score += gain;
+  const n = p.type === 'big' ? 14 : p.type === 'red' ? 9 : p.type === 'black' ? 4 : 6;
+  for (let i = 0; i < n; i++) {
+    const a = -Math.PI / 2 + (Math.random() - .5) * 2.2, sp = 80 + Math.random() * (p.type === 'big' ? 260 : 160);
+    drops.push({ x: p.x, y: p.y, vx: Math.cos(a) * sp, vy: Math.sin(a) * sp, r: 1.5 + Math.random() * (p.type === 'big' ? 3.5 : 2), t: 1.2, black: p.type === 'black' });
+  }
+  fx.push({ x: p.x, y: p.y - 26, t: 1, s: (perfect ? '完美！' : '啵！') + ' +' + gain, col: perfect ? '#2b9348' : '#d6336c', big: perfect });
+  fx.push({ x: p.x, y: p.y, t: .4, ring: true });
+  pop(p.type === 'big'); buzz(perfect ? 40 : 20); wince = .5;
+  setTip(perfect ? '漂亮！力道剛剛好' : '');
+}
+function scarIt(p, msg) {
+  pimples = pimples.filter(q => q !== p);
+  scars.push({ x: p.x, y: p.y, r: p.T.r * 1.3 + 3 });
+  scarN++; combo = 0; score = Math.max(0, score - 15);
+  fx.push({ x: p.x, y: p.y - 26, t: 1.1, s: msg + ' -15', col: '#c92a2a' });
+  ouch(); buzz([30, 40, 30]); wince = 1; ouchT = 1;
+  setTip('留疤了…下次看準時機');
+}
+
+/* 操作 */
+const pointers = new Map();
+let lastTap = { t: 0, p: null };
+function toLocal(e) { const r = cv.getBoundingClientRect(); return { x: (e.clientX - r.left) / r.width * W, y: (e.clientY - r.top) / r.height * H }; }
+function hitPimple(x, y, pad = 18) {
+  let best = null, bd = 1e9;
+  for (const p of pimples) { const d = Math.hypot(p.x - x, p.y - y); if (d < p.T.r + pad && d < bd) { bd = d; best = p; } }
+  return best;
+}
+cv.addEventListener('pointerdown', e => {
+  initAudio(); if (state !== 'play') return;
+  cv.setPointerCapture(e.pointerId);
+  const q = toLocal(e); pointers.set(e.pointerId, { ...q, sx: q.x, sy: q.y });
+  if (pointers.size === 2) {
+    // 兩指捏黑頭
+    if (press) { press = null; squishOn(false); }
+    const [a, b] = [...pointers.values()], mx = (a.x + b.x) / 2, my = (a.y + b.y) / 2;
+    const bh = pimples.filter(p => p.type === 'black').sort((p, q2) => Math.hypot(p.x - mx, p.y - my) - Math.hypot(q2.x - mx, q2.y - my))[0];
+    if (bh && Math.hypot(bh.x - mx, bh.y - my) < 80) pinch = { p: bh, d0: Math.hypot(a.x - b.x, a.y - b.y) };
+    return;
+  }
+  const p = hitPimple(q.x, q.y);
+  if (!p) return;
+  if (p.type === 'black') {
+    const now = performance.now();
+    if (lastTap.p === p && now - lastTap.t < 350) { popIt(p, true); lastTap = { t: 0, p: null }; return; }
+    lastTap = { t: now, p }; setTip('黑頭要兩指往中間捏（電腦可雙擊）'); return;
+  }
+  press = { p, v: 0 }; squishOn(true); wince = .6;
+});
+let pinch = null;
+cv.addEventListener('pointermove', e => {
+  if (!pointers.has(e.pointerId)) return;
+  const q = toLocal(e), o = pointers.get(e.pointerId); o.x = q.x; o.y = q.y;
+  if (pinch && pointers.size === 2) {
+    const [a, b] = [...pointers.values()], d = Math.hypot(a.x - b.x, a.y - b.y);
+    if (pimples.includes(pinch.p) && d < pinch.d0 * .65) { popIt(pinch.p, true); pinch = null; }
+  }
+  // 手指滑出痘痘就取消
+  if (press && pointers.size === 1 && Math.hypot(q.x - press.p.x, q.y - press.p.y) > 60) { press = null; squishOn(false); }
+});
+function up(e) {
+  pointers.delete(e.pointerId);
+  if (pointers.size < 2) pinch = null;
+  if (press && pointers.size === 0) { const pr = press; press = null; if (pimples.includes(pr.p)) finishPress(pr.p, pr.v); }
+}
+cv.addEventListener('pointerup', up); cv.addEventListener('pointercancel', e => { pointers.delete(e.pointerId); press = null; pinch = null; squishOn(false); });
+
+/* 更新 */
+function update(dt) {
+  fx.forEach(f => f.t -= dt); fx = fx.filter(f => f.t > 0);
+  drops.forEach(d => { if (d.land) { d.t -= dt * .5; return; } d.vy += 600 * dt; d.x += d.vx * dt; d.y += d.vy * dt; d.t -= dt; if (d.t < .7) d.land = true; });
+  drops = drops.filter(d => d.t > 0);
+  wince = Math.max(0, wince - dt * 1.5); ouchT = Math.max(0, ouchT - dt);
+  blinkT -= dt; if (blinkT < -0.12) blinkT = 2 + Math.random() * 3;
+  if (state !== 'play') return;
+  t += dt;
+  for (const p of pimples) { p.age += dt; if (p.T.ripen) p.ripe = Math.min(1, p.age / p.T.ripen); p.pulse += dt; }
+  if (press) {
+    press.v += dt;
+    if (squish) { squish.g.gain.value = Math.min(.12, press.v * .08); squish.f.frequency.value = 200 + press.v * 300; }
+    wince = Math.max(wince, .5);
+    if (press.v > press.p.T.hi * 1.35 + .1) { const p = press.p; press = null; squishOn(false); scarIt(p, '太用力了！'); }
+  }
+  spawnT -= dt;
+  const maxN = 4 + Math.floor(t / 12);
+  if (spawnT <= 0) { if (pimples.length < maxN) spawn(); spawnT = Math.max(.8, 1.7 - t * .015); }
+  if (t >= GAME_T) endGame();
+  hud();
+}
+function endGame() {
+  state = 'over'; press = null; squishOn(false);
+  if (score > best) { best = score; try { localStorage.setItem('pimpleBest', best); } catch (e) {} }
+  const left = pimples.length;
+  const [rk, title] = scarN === 0 && left <= 2 ? ['🥚', '水煮蛋肌！'] : scarN <= 2 && left <= 4 ? ['😊', '還算乾淨'] : scarN <= 5 ? ['😅', '有點戰況'] : ['🤕', '滿臉戰痕'];
+  document.getElementById('rank').textContent = rk; document.getElementById('oTitle').textContent = title;
+  document.getElementById('sScore').textContent = score; document.getElementById('sPop').textContent = pops + ' 顆';
+  document.getElementById('sPerfect').textContent = perfects + ' 顆'; document.getElementById('sScar').textContent = scarN + ' 個';
+  document.getElementById('sCombo').textContent = maxCombo; document.getElementById('sBest').textContent = best;
+  setTip(''); setTimeout(() => document.getElementById('over').hidden = false, 400);
+}
+document.getElementById('start').onclick = () => { initAudio(); startGame(); };
+document.getElementById('again').onclick = () => { initAudio(); startGame(); };
+
+/* 繪圖 */
+function drawFace() {
+  const { x, y, rx, ry } = FACE;
+  // 背景
+  const bg = ctx.createLinearGradient(0, 0, 0, H); bg.addColorStop(0, '#fff0f3'); bg.addColorStop(1, '#ffd6de');
+  ctx.fillStyle = bg; ctx.fillRect(0, 0, W, H);
+  // 脖子與衣服
+  ctx.fillStyle = '#f2c4a6'; ctx.fillRect(160, 470, 80, 90);
+  ctx.fillStyle = '#74c0fc'; ctx.beginPath(); ctx.moveTo(40, H); ctx.quadraticCurveTo(60, 530, 160, 530); ctx.lineTo(240, 530); ctx.quadraticCurveTo(340, 530, 360, H); ctx.fill();
+  // 後髮
+  ctx.fillStyle = '#4a2c2a';
+  ctx.beginPath(); ctx.ellipse(x, y - 38, rx + 12, ry - 10, 0, Math.PI, Math.PI * 2); ctx.lineTo(x + rx + 12, y + 30); ctx.lineTo(x - rx - 12, y + 30); ctx.closePath(); ctx.fill();
+  // 耳朵
+  ctx.fillStyle = '#f5c9aa';
+  ctx.beginPath(); ctx.ellipse(x - rx + 2, y + 10, 20, 32, 0, 0, Math.PI * 2); ctx.fill();
+  ctx.beginPath(); ctx.ellipse(x + rx - 2, y + 10, 20, 32, 0, 0, Math.PI * 2); ctx.fill();
+  // 臉
+  const sk = ctx.createRadialGradient(x - 30, y - 40, 40, x, y, ry);
+  sk.addColorStop(0, '#ffe3cc'); sk.addColorStop(1, '#f6c3a0');
+  ctx.fillStyle = sk; ctx.beginPath(); ctx.ellipse(x, y, rx, ry, 0, 0, Math.PI * 2); ctx.fill();
+  // 瀏海（下緣在 y≈150，不擋額頭痘痘區）
+  ctx.fillStyle = '#4a2c2a';
+  ctx.beginPath(); ctx.moveTo(x - rx - 6, y - 10);
+  ctx.ellipse(x, y - 38, rx + 8, ry - 14, 0, Math.PI, Math.PI * 2);
+  ctx.lineTo(x + rx + 6, y - 10);
+  ctx.quadraticCurveTo(x + rx - 14, y - 120, x + 90, y - 150);
+  ctx.quadraticCurveTo(x + 60, y - 140, x + 40, y - 158);
+  ctx.quadraticCurveTo(x + 10, y - 142, x - 10, y - 160);
+  ctx.quadraticCurveTo(x - 40, y - 140, x - 70, y - 156);
+  ctx.quadraticCurveTo(x - 100, y - 140, x - 112, y - 120);
+  ctx.quadraticCurveTo(x - rx - 2, y - 80, x - rx - 6, y - 10);
+  ctx.closePath(); ctx.fill();
+  // 腮紅
+  ctx.fillStyle = 'rgba(255,140,150,.25)';
+  ctx.beginPath(); ctx.ellipse(x - 88, y + 70, 26, 14, 0, 0, Math.PI * 2); ctx.fill();
+  ctx.beginPath(); ctx.ellipse(x + 88, y + 70, 26, 14, 0, 0, Math.PI * 2); ctx.fill();
+  // 眉毛
+  const w = wince;
+  ctx.strokeStyle = '#4a2c2a'; ctx.lineWidth = 5; ctx.lineCap = 'round';
+  ctx.beginPath(); ctx.moveTo(x - 82, y - 52 + w * 6); ctx.quadraticCurveTo(x - 60, y - 64 - w * 2, x - 36, y - 56 + w * 10); ctx.stroke();
+  ctx.beginPath(); ctx.moveTo(x + 82, y - 52 + w * 6); ctx.quadraticCurveTo(x + 60, y - 64 - w * 2, x + 36, y - 56 + w * 10); ctx.stroke();
+  // 眼睛
+  const closed = w > .35 || blinkT < 0;
+  for (const s of [-1, 1]) {
+    const ex = x + s * 58, ey = y - 22;
+    if (closed) {
+      ctx.strokeStyle = '#3b2321'; ctx.lineWidth = 4;
+      ctx.beginPath(); ctx.moveTo(ex - 14, ey - 4 * s * 0); ctx.lineTo(ex, ey + (w > .35 ? -6 : 2)); ctx.lineTo(ex + 14, ey); ctx.stroke();
+    } else {
+      ctx.fillStyle = '#fff'; ctx.beginPath(); ctx.ellipse(ex, ey, 16, 13, 0, 0, Math.PI * 2); ctx.fill();
+      ctx.fillStyle = '#3b2321'; ctx.beginPath(); ctx.arc(ex + 2, ey + 1, 8, 0, Math.PI * 2); ctx.fill();
+      ctx.fillStyle = '#fff'; ctx.beginPath(); ctx.arc(ex + 5, ey - 3, 2.6, 0, Math.PI * 2); ctx.fill();
+    }
+  }
+  if (w > .6) { ctx.fillStyle = '#74c0fc'; ctx.beginPath(); ctx.ellipse(x + 82, y - 4, 4, 7, 0, 0, Math.PI * 2); ctx.fill(); }
+  // 鼻子
+  ctx.strokeStyle = '#d99a7a'; ctx.lineWidth = 3;
+  ctx.beginPath(); ctx.moveTo(x - 4, y + 2); ctx.quadraticCurveTo(x - 16, y + 44, x - 2, y + 48); ctx.quadraticCurveTo(x + 8, y + 50, x + 12, y + 44); ctx.stroke();
+  // 嘴巴
+  ctx.strokeStyle = '#b5485d'; ctx.lineWidth = 4;
+  if (w > .3) { ctx.fillStyle = '#b5485d'; ctx.beginPath(); ctx.ellipse(x, y + 100, 18, 8 + w * 6, 0, 0, Math.PI * 2); ctx.fill(); ctx.fillStyle = '#fff'; ctx.fillRect(x - 14, y + 94 - w * 4, 28, 5); }
+  else { ctx.beginPath(); ctx.moveTo(x - 26, y + 94); ctx.quadraticCurveTo(x, y + 116, x + 26, y + 94); ctx.stroke(); }
+}
+function drawPimple(p) {
+  const T = p.T, pr = press && press.p === p ? press.v : 0;
+  const sw = 1 + Math.min(.5, pr * .25) + Math.sin(p.pulse * 3) * .03;
+  if (p.type === 'black') {
+    ctx.fillStyle = 'rgba(160,110,80,.35)'; ctx.beginPath(); ctx.arc(p.x, p.y, T.r + 3, 0, Math.PI * 2); ctx.fill();
+    ctx.fillStyle = '#2b1d16'; ctx.beginPath(); ctx.arc(p.x, p.y, T.r, 0, Math.PI * 2); ctx.fill();
+    return;
+  }
+  const R = T.r * sw * (.6 + .4 * Math.min(1, p.age / .6));
+  // 紅暈
+  const red = ctx.createRadialGradient(p.x, p.y, 0, p.x, p.y, R * 2.1);
+  red.addColorStop(0, `rgba(230,80,80,${.55 + pr * .2})`); red.addColorStop(1, 'rgba(230,80,80,0)');
+  ctx.fillStyle = red; ctx.beginPath(); ctx.arc(p.x, p.y, R * 2.1, 0, Math.PI * 2); ctx.fill();
+  // 凸起
+  const bump = ctx.createRadialGradient(p.x - R * .3, p.y - R * .35, 0, p.x, p.y, R);
+  bump.addColorStop(0, '#ffb3a7'); bump.addColorStop(1, '#e8665e');
+  ctx.fillStyle = bump; ctx.beginPath(); ctx.arc(p.x, p.y, R, 0, Math.PI * 2); ctx.fill();
+  // 白頭（熟度）
+  if (p.ripe > .25) {
+    const wr = R * .62 * Math.min(1, (p.ripe - .25) / .75) * (1 + pr * .15);
+    const wh = ctx.createRadialGradient(p.x - wr * .3, p.y - wr * .3, 0, p.x, p.y, wr);
+    wh.addColorStop(0, '#fffef2'); wh.addColorStop(1, p.ripe >= 1 ? '#f5e6a8' : '#f3d0b8');
+    ctx.fillStyle = wh; ctx.beginPath(); ctx.arc(p.x, p.y - 1, wr, 0, Math.PI * 2); ctx.fill();
+  }
+  if (p.ripe >= 1 && !press) {   // 熟了的提示閃光
+    ctx.strokeStyle = `rgba(255,255,255,${.35 + .3 * Math.sin(p.pulse * 5)})`; ctx.lineWidth = 1.5;
+    ctx.beginPath(); ctx.arc(p.x, p.y, R + 4, 0, Math.PI * 2); ctx.stroke();
+  }
+}
+function drawGauge() {
+  if (!press) return;
+  const p = press.p, T = p.T, max = T.hi * 1.35 + .1, R = T.r + 24;
+  const a0 = -Math.PI / 2, ang = v => a0 + Math.min(1, v / max) * Math.PI * 2;
+  ctx.lineWidth = 7; ctx.lineCap = 'butt';
+  ctx.strokeStyle = 'rgba(255,255,255,.75)'; ctx.beginPath(); ctx.arc(p.x, p.y, R, 0, Math.PI * 2); ctx.stroke();
+  if (p.ripe >= 1) { ctx.strokeStyle = '#51cf66'; ctx.beginPath(); ctx.arc(p.x, p.y, R, ang(T.lo), ang(T.hi)); ctx.stroke();
+    const mid = (T.lo + T.hi) / 2, half = (T.hi - T.lo) * .2; ctx.strokeStyle = '#2b9348'; ctx.beginPath(); ctx.arc(p.x, p.y, R, ang(mid - half), ang(mid + half)); ctx.stroke(); }
+  ctx.strokeStyle = '#ff6b6b'; ctx.beginPath(); ctx.arc(p.x, p.y, R, ang(T.hi), a0 + Math.PI * 2); ctx.stroke();
+  // 指針
+  const a = ang(press.v); ctx.strokeStyle = '#d6336c'; ctx.lineWidth = 4; ctx.lineCap = 'round';
+  ctx.beginPath(); ctx.moveTo(p.x + Math.cos(a) * (R - 8), p.y + Math.sin(a) * (R - 8)); ctx.lineTo(p.x + Math.cos(a) * (R + 8), p.y + Math.sin(a) * (R + 8)); ctx.stroke();
+  ctx.fillStyle = '#4a2c2a'; ctx.font = '700 12px system-ui'; ctx.textAlign = 'center';
+  ctx.fillText(p.ripe < 1 ? '還沒熟！' : T.name, p.x, p.y - R - 10);
+}
+function draw() {
+  ctx.setTransform(scale, 0, 0, scale, 0, 0);
+  const sh = ouchT > .7 ? (Math.random() - .5) * 6 : 0;
+  ctx.translate(sh, 0);
+  drawFace();
+  for (const s of scars) {
+    const g = ctx.createRadialGradient(s.x, s.y, 0, s.x, s.y, s.r);
+    g.addColorStop(0, 'rgba(170,50,60,.75)'); g.addColorStop(.6, 'rgba(200,80,80,.4)'); g.addColorStop(1, 'rgba(200,80,80,0)');
+    ctx.fillStyle = g; ctx.beginPath(); ctx.arc(s.x, s.y, s.r, 0, Math.PI * 2); ctx.fill();
+  }
+  pimples.forEach(drawPimple);
+  for (const d of drops) {
+    ctx.globalAlpha = Math.min(1, d.t * 1.5); ctx.fillStyle = d.black ? '#3b2a20' : '#fff9e6';
+    ctx.strokeStyle = 'rgba(200,170,110,.6)'; ctx.lineWidth = .8;
+    ctx.beginPath(); ctx.ellipse(d.x, d.y, d.r * (d.land ? 1.4 : 1), d.r * (d.land ? .8 : 1), 0, 0, Math.PI * 2); ctx.fill(); ctx.stroke();
+    ctx.globalAlpha = 1;
+  }
+  drawGauge();
+  for (const f of fx) {
+    if (f.ring) { ctx.strokeStyle = `rgba(255,255,255,${f.t * 2})`; ctx.lineWidth = 3; ctx.beginPath(); ctx.arc(f.x, f.y, 10 + (1 - f.t / .4) * 30, 0, Math.PI * 2); ctx.stroke(); continue; }
+    ctx.globalAlpha = Math.min(1, f.t * 2); ctx.font = `900 ${f.big ? 20 : 16}px system-ui`; ctx.textAlign = 'center';
+    ctx.lineWidth = 4; ctx.strokeStyle = '#fff'; ctx.strokeText(f.s, f.x, f.y - (1 - f.t) * 18);
+    ctx.fillStyle = f.col; ctx.fillText(f.s, f.x, f.y - (1 - f.t) * 18); ctx.globalAlpha = 1;
+  }
+  if (ouchT > 0) {
+    ctx.globalAlpha = Math.min(1, ouchT * 2); ctx.fillStyle = '#fff'; ctx.strokeStyle = '#c92a2a'; ctx.lineWidth = 3;
+    ctx.beginPath(); ctx.ellipse(330, 120, 44, 26, 0, 0, Math.PI * 2); ctx.fill(); ctx.stroke();
+    ctx.fillStyle = '#c92a2a'; ctx.font = '900 22px system-ui'; ctx.textAlign = 'center'; ctx.textBaseline = 'middle'; ctx.fillText('痛！', 330, 121); ctx.textBaseline = 'alphabetic';
+    ctx.globalAlpha = 1;
+  }
+}
+
+let last = performance.now();
+function loop(now) { const dt = Math.min(.033, (now - last) / 1000); last = now; update(dt); draw(); requestAnimationFrame(loop); }
+hud(); requestAnimationFrame(loop);
+window.__pp = { get pimples() { return pimples; }, get state() { return state; }, get score() { return score; }, get scars() { return scarN; }, get pops() { return pops; }, startGame };
+})();
+</script>
+</body>
+</html>

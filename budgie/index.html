@@ -1,0 +1,276 @@
+<!DOCTYPE html>
+<html lang="zh-Hant">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1,maximum-scale=1">
+<title>會說話的虎皮鸚鵡</title>
+<style>
+  :root{--bg1:#e8f6ff;--bg2:#fff6d6;--ink:#2b3440;--acc:#2f78c9}
+  *{box-sizing:border-box}
+  html,body{margin:0;min-height:100%;background:linear-gradient(180deg,var(--bg1),var(--bg2));color:var(--ink);font-family:system-ui,-apple-system,"PingFang TC","Noto Sans TC",sans-serif;-webkit-tap-highlight-color:transparent}
+  #app{max-width:480px;margin:0 auto;padding:10px 14px 30px}
+  header{display:flex;justify-content:space-between;align-items:center}
+  h1{font-size:19px;margin:4px 0}
+  #mood{display:flex;align-items:center;gap:6px;font-size:13px}
+  #moodBar{width:90px;height:9px;background:#0001;border-radius:5px;overflow:hidden}
+  #moodBar i{display:block;height:100%;background:linear-gradient(90deg,#ffb703,#06d6a0);width:60%;transition:width .4s}
+  #stage{position:relative;height:min(52vh,420px);display:flex;justify-content:center;align-items:flex-end}
+  svg{height:100%;max-width:100%;overflow:visible;cursor:pointer;touch-action:manipulation}
+  #bubble{position:absolute;top:2%;right:2%;max-width:62%;background:#fff;border-radius:18px;padding:10px 14px;font-size:18px;font-weight:700;box-shadow:0 4px 14px #0002;opacity:0;transform:scale(.7);transform-origin:20% 100%;transition:all .2s;pointer-events:none;word-break:break-word}
+  #bubble.show{opacity:1;transform:scale(1)}
+  #bubble:after{content:"";position:absolute;left:18px;bottom:-10px;border:10px solid transparent;border-top-color:#fff;border-bottom:0}
+  .fx{position:absolute;font-size:22px;pointer-events:none;animation:up 1.2s ease-out forwards}
+  @keyframes up{to{transform:translateY(-70px);opacity:0}}
+  .row{display:flex;gap:8px;margin-top:10px}
+  input{flex:1;font-size:16px;padding:11px 12px;border-radius:12px;border:2px solid #cfe3f5;background:#fff;outline:none}
+  input:focus{border-color:var(--acc)}
+  button{font-size:15px;border:0;border-radius:12px;padding:11px 14px;font-weight:700;background:var(--acc);color:#fff}
+  button.sec{background:#fff;color:var(--ink);border:2px solid #e3e9ef}
+  #chips{display:flex;flex-wrap:wrap;gap:6px;margin-top:10px}
+  .chip{display:flex;align-items:center;background:#fff;border:1.5px solid #d7e6f3;border-radius:16px;padding:5px 4px 5px 11px;font-size:14px}
+  .chip b{font-size:11px;color:#8aa0b5;margin-left:5px;font-weight:600}
+  .chip span.x{margin-left:4px;width:20px;height:20px;border-radius:50%;display:flex;align-items:center;justify-content:center;color:#a0aec0;font-size:13px}
+  .hint{font-size:12px;color:#7a8794;margin-top:10px;line-height:1.6}
+  /* 動畫 */
+  #bird{transform-origin:150px 300px;animation:bob 3.2s ease-in-out infinite}
+  @keyframes bob{50%{transform:translateY(-3px)}}
+  #head{transform-origin:150px 165px;transition:transform .35s cubic-bezier(.3,1.6,.5,1)}
+  #lid{transform-origin:168px 108px;transform:scaleY(0);transition:transform .08s}
+  #lowerBeak{transform-origin:186px 134px;transition:transform .07s}
+  #lowerBeak.open{transform:rotate(22deg)}
+  #upperBeak{transform-origin:186px 124px;transition:transform .07s}
+  #upperBeak.open{transform:rotate(-6deg)}
+  #bodyG{transform-origin:150px 230px;transition:transform .25s}
+  #bodyG.fluff{transform:scale(1.08,1.05)}
+  #head.peck{animation:peck .5s ease-in-out 3}
+  @keyframes peck{40%{transform:rotate(38deg) translate(4px,6px)}}
+  .seed{transition:transform .6s cubic-bezier(.5,0,1,1),opacity .3s}
+</style>
+</head>
+<body>
+<div id="app">
+  <header>
+    <h1>🦜 小啾</h1>
+    <div id="mood"><span id="moodEmoji">🙂</span><div id="moodBar"><i></i></div></div>
+  </header>
+  <div id="stage">
+    <div id="bubble"></div>
+    <svg id="svg" viewBox="0 0 300 360" aria-label="虎皮鸚鵡">
+      <defs>
+        <linearGradient id="bodyGrad" x1="0" y1="0" x2="0" y2="1"><stop offset="0" stop-color="#9aa9f0"/><stop offset="1" stop-color="#5263cc"/></linearGradient>
+        <linearGradient id="wingGrad" x1="0" y1="0" x2="1" y2="1"><stop offset="0" stop-color="#f3f4f8"/><stop offset="1" stop-color="#c3cbea"/></linearGradient>
+        <radialGradient id="headGrad" cx=".6" cy=".55" r=".7"><stop offset="0" stop-color="#fff27a"/><stop offset="1" stop-color="#ffd21f"/></radialGradient>
+        <radialGradient id="chestGrad" cx=".5" cy=".3" r=".6"><stop offset="0" stop-color="#cfe58a" stop-opacity=".95"/><stop offset=".6" stop-color="#a6d8b4" stop-opacity=".6"/><stop offset="1" stop-color="#a6d8b4" stop-opacity="0"/></radialGradient>
+        <clipPath id="wingClip"><path d="M98 158 Q84 232 122 288 Q150 294 152 252 Q144 188 122 156 Z"/></clipPath>
+        <clipPath id="headClip"><circle cx="150" cy="118" r="50"/></clipPath>
+      </defs>
+      <!-- 棲木 -->
+      <rect x="18" y="290" width="264" height="15" rx="7.5" fill="#8b5a2b"/>
+      <path d="M40 296 h40 M110 300 h30 M190 295 h50" stroke="#6e431d" stroke-width="2" stroke-linecap="round"/>
+      <!-- 飼料碗 -->
+      <g id="dish"><path d="M222 290 h46 q-4 -16 -23 -16 q-19 0 -23 16z" fill="#e76f51"/><ellipse cx="245" cy="276" rx="20" ry="4" fill="#f4a261"/><g id="seedsInDish"></g></g>
+      <g id="seedsFalling"></g>
+      <g id="bird">
+        <!-- 尾巴 -->
+        <path d="M134 262 L114 352 L134 356 L152 270 Z" fill="#4558c0"/>
+        <path d="M148 266 L154 356 L174 352 L164 262 Z" fill="#5f73d8"/>
+        <g id="bodyG">
+          <ellipse cx="150" cy="208" rx="58" ry="80" fill="url(#bodyGrad)"/>
+          <ellipse cx="162" cy="222" rx="36" ry="56" fill="#a9b6f5" opacity=".5"/>
+          <ellipse cx="165" cy="176" rx="40" ry="26" fill="url(#chestGrad)"/>
+          <!-- 翅膀 -->
+          <path d="M98 158 Q84 232 122 288 Q150 294 152 252 Q144 188 122 156 Z" fill="url(#wingGrad)"/>
+          <g clip-path="url(#wingClip)" id="wingScallops" stroke="#7d8cc8" stroke-width="2.6" fill="none" stroke-linecap="round"></g>
+          <path d="M98 158 Q84 232 122 288" stroke="#8a97cf" stroke-width="2" fill="none"/>
+        </g>
+        <!-- 腳 -->
+        <g stroke="#d4a3a3" stroke-width="5" stroke-linecap="round" fill="none">
+          <path d="M136 280 q-6 10 -12 14 M136 280 q0 12 -3 16 M136 280 q8 10 14 10"/>
+          <path d="M164 280 q-6 10 -10 14 M164 280 q2 12 0 16 M164 280 q8 10 14 10"/>
+        </g>
+        <g id="head">
+          <!-- 黃色臉罩（蓋住身體上緣） -->
+          <ellipse cx="166" cy="152" rx="30" ry="22" fill="#ffd21f"/>
+          <circle cx="150" cy="118" r="50" fill="url(#headGrad)"/>
+          <!-- 頭頂與後腦的黑色波浪紋 -->
+          <g clip-path="url(#headClip)" stroke="#2b2b2b" stroke-width="2" fill="none" stroke-linecap="round" opacity=".35" id="headBars"></g>
+          <!-- 喉部黑點 -->
+          <circle cx="158" cy="166" r="3.2" fill="#1d1d1d"/><circle cx="170" cy="169" r="3.4" fill="#1d1d1d"/><circle cx="182" cy="166" r="3" fill="#1d1d1d"/>
+          <!-- 臉頰紫藍斑 -->
+          <ellipse cx="180" cy="150" rx="7" ry="9.5" fill="#5b4bd6" transform="rotate(-15 180 150)"/>
+          <!-- 眼睛 -->
+          <circle cx="168" cy="108" r="9.5" fill="#fff"/>
+          <circle cx="169" cy="108" r="6.3" fill="#121212"/>
+          <circle cx="171.5" cy="105.5" r="2.2" fill="#fff"/>
+          <ellipse id="lid" cx="168" cy="108" rx="10.5" ry="10.5" fill="#ffd21f"/>
+          <!-- 蠟膜 -->
+          <ellipse cx="193" cy="117" rx="8" ry="6" fill="#7ec8f0"/>
+          <!-- 嘴 -->
+          <path id="lowerBeak" d="M184 133 Q198 134 201 141 Q195 151 183 145 Z" fill="#e0a456" stroke="#b9853c" stroke-width="1"/>
+          <path id="upperBeak" d="M184 121 Q207 121 205 141 Q199 134 184 135 Z" fill="#f2c776" stroke="#c99540" stroke-width="1.2"/>
+        </g>
+      </g>
+    </svg>
+  </div>
+
+  <div class="row">
+    <button class="sec" id="feed" style="flex:1">🌾 餵小米</button>
+    <button class="sec" id="random" style="flex:1">🎵 叫一聲</button>
+  </div>
+  <div class="hint">小啾只會說三句：<b>啾啾</b>、<b>好香</b>、<b>摸摸</b>。<br>點小啾（摸摸牠）牠會說「摸摸」，餵小米會說「好香」，平常會「啾啾」叫。<br>如果沒有聲音，請確認手機不是靜音模式。</div>
+</div>
+<script>
+(() => {
+const $ = id => document.getElementById(id);
+const NS = 'http://www.w3.org/2000/svg';
+
+/* 畫翅膀鱗紋和頭部波浪紋 */
+(() => {
+  let d = '';
+  for (let r = 0, y = 168; y < 290; r++, y += 13) for (let x = 92 + (r % 2) * 6; x < 156; x += 12) d += `M${x} ${y} q6 8 12 0 `;
+  const p = document.createElementNS(NS, 'path'); p.setAttribute('d', d); $('wingScallops').appendChild(p);
+  let h = '';
+  [74, 82, 90, 98, 106, 114].forEach((y, i) => { const x0 = 96, x1 = 150 - i * 6; for (let x = x0; x < x1; x += 10) h += `M${x} ${y} q5 -4 10 0 `; });
+  const q = document.createElementNS(NS, 'path'); q.setAttribute('d', h); $('headBars').appendChild(q);
+})();
+
+/* 狀態 */
+// 小啾只會說這三句
+const WORDS = ['啾啾', '好香', '摸摸'];
+let mood = 60;
+try { const s = JSON.parse(localStorage.getItem('budgie') || 'null'); if (s && typeof s.mood === 'number') mood = s.mood; } catch (e) {}
+function save() { try { localStorage.setItem('budgie', JSON.stringify({ mood })); } catch (e) {} }
+function setMood(v) {
+  mood = Math.max(0, Math.min(100, v));
+  $('moodBar').firstElementChild.style.width = mood + '%';
+  $('moodEmoji').textContent = mood > 75 ? '😄' : mood > 40 ? '🙂' : mood > 15 ? '😐' : '😴';
+  save();
+}
+/* 聲音 */
+let ac = null;
+function audio() { if (!ac) { try { ac = new (window.AudioContext || window.webkitAudioContext)(); } catch (e) {} } else if (ac.state === 'suspended') ac.resume(); return ac; }
+function chirp(n = 2) {
+  const a = audio(); if (!a) return;
+  for (let i = 0; i < n; i++) {
+    const t = a.currentTime + i * .11, o = a.createOscillator(), g = a.createGain();
+    const f = 2800 + Math.random() * 1400;
+    o.type = 'sine'; o.frequency.setValueAtTime(f, t); o.frequency.exponentialRampToValueAtTime(f * (Math.random() < .5 ? 1.5 : .7), t + .08);
+    g.gain.setValueAtTime(.0001, t); g.gain.exponentialRampToValueAtTime(.08, t + .01); g.gain.exponentialRampToValueAtTime(.0001, t + .09);
+    o.connect(g).connect(a.destination); o.start(t); o.stop(t + .1);
+  }
+}
+let voices = [];
+function loadVoices() { try { voices = speechSynthesis.getVoices(); } catch (e) {} }
+if ('speechSynthesis' in window) { loadVoices(); speechSynthesis.onvoiceschanged = loadVoices; }
+function pickVoice(lang) {
+  if (lang === 'zh') return voices.find(v => /zh[-_]TW/i.test(v.lang)) || voices.find(v => /zh[-_](HK|CN)|cmn/i.test(v.lang)) || voices.find(v => /^zh/i.test(v.lang));
+  return voices.find(v => /^en[-_]US/i.test(v.lang)) || voices.find(v => /^en/i.test(v.lang));
+}
+
+/* 嘴巴動畫 */
+let mouthTimer = null, bubbleTimer = null, speaking = false;
+function mouth(on) {
+  clearInterval(mouthTimer);
+  const set = o => { $('lowerBeak').classList.toggle('open', o); $('upperBeak').classList.toggle('open', o); };
+  if (!on) { set(false); return; }
+  let o = false; mouthTimer = setInterval(() => { o = !o; set(o); }, 110);
+}
+function say(text) {
+  text = String(text).trim(); if (!WORDS.includes(text)) text = '啾啾';
+  speaking = true;
+  const b = $('bubble'); b.textContent = text; b.classList.add('show');
+  clearTimeout(bubbleTimer);
+  tilt();
+  chirp(2);
+  mouth(true);
+  const fallbackMs = 800 + text.length * 380;
+  let done = false;
+  const finish = () => { if (done) return; done = true; mouth(false); speaking = false; bubbleTimer = setTimeout(() => b.classList.remove('show'), 1400); };
+  setTimeout(() => {
+    if ('speechSynthesis' in window) {
+      try {
+        speechSynthesis.cancel();
+        const zh = /[㐀-鿿]/.test(text);
+        const u = new SpeechSynthesisUtterance(text);
+        u.lang = zh ? 'zh-TW' : 'en-US';
+        const v = pickVoice(zh ? 'zh' : 'en'); if (v) u.voice = v;
+        u.pitch = 2; u.rate = 0.85; u.volume = 1;
+        u.onend = finish; u.onerror = finish;
+        speechSynthesis.speak(u);
+      } catch (e) {}
+    }
+    setTimeout(finish, fallbackMs + 1500);
+  }, 260);
+}
+
+/* 動作 */
+function tilt() {
+  const h = $('head'); const a = (Math.random() < .5 ? -1 : 1) * (8 + Math.random() * 10);
+  h.style.transform = `rotate(${a}deg)`; setTimeout(() => h.style.transform = '', 900);
+}
+function blink() { const l = $('lid'); l.style.transform = 'scaleY(1)'; setTimeout(() => l.style.transform = 'scaleY(0)', 130); }
+(function blinkLoop() { blink(); setTimeout(blinkLoop, 2200 + Math.random() * 3500); })();
+function fx(emoji, x, y) {
+  const st = $('stage').getBoundingClientRect(), e = document.createElement('div');
+  e.className = 'fx'; e.textContent = emoji; e.style.left = (x - st.left - 11) + 'px'; e.style.top = (y - st.top - 20) + 'px';
+  $('stage').appendChild(e); setTimeout(() => e.remove(), 1300);
+}
+$('svg').addEventListener('click', e => {
+  audio(); chirp(3 + (Math.random() * 3 | 0));
+  const g = $('bodyG'); g.classList.add('fluff'); setTimeout(() => g.classList.remove('fluff'), 500);
+  tilt(); fx(['💙', '💛', '✨', '🎵'][Math.random() * 4 | 0], e.clientX, e.clientY);
+  setMood(mood + 4);
+  if (!speaking) setTimeout(() => say(Math.random() < .7 ? '摸摸' : '啾啾'), 500);
+});
+function feed() {
+  audio();
+  const fall = $('seedsFalling'), dish = $('seedsInDish');
+  for (let i = 0; i < 9; i++) {
+    const c = document.createElementNS(NS, 'ellipse');
+    const x = 232 + Math.random() * 26;
+    c.setAttribute('cx', x); c.setAttribute('cy', 200 + Math.random() * 30); c.setAttribute('rx', 2.4); c.setAttribute('ry', 1.6);
+    c.setAttribute('fill', ['#e9c46a', '#f4d58d', '#d4a373'][i % 3]); c.classList.add('seed');
+    fall.appendChild(c);
+    setTimeout(() => { c.style.transform = `translateY(${272 - +c.getAttribute('cy') + Math.random() * 3}px)`; }, 30 + i * 50);
+    setTimeout(() => { fall.removeChild(c); if (dish.childNodes.length < 14) dish.appendChild(c); c.style.transform = ''; c.setAttribute('cy', 274 + Math.random() * 2); }, 750 + i * 50);
+  }
+  // 走到碗邊啄食
+  const bird = $('bird');
+  bird.style.transition = 'transform .5s'; bird.style.animation = 'none'; bird.style.transform = 'translateX(40px)';
+  setTimeout(() => {
+    const h = $('head'); h.classList.add('peck');
+    const ck = setInterval(() => chirp(1), 500);
+    setTimeout(() => {
+      h.classList.remove('peck'); clearInterval(ck);
+      while ($('seedsInDish').childNodes.length > 4) $('seedsInDish').removeChild($('seedsInDish').firstChild);
+      bird.style.transform = ''; setTimeout(() => { bird.style.transition = ''; bird.style.animation = ''; }, 500);
+      setMood(mood + 15); fx('😋', $('svg').getBoundingClientRect().left + $('svg').getBoundingClientRect().width * .6, $('svg').getBoundingClientRect().top + 60);
+      setTimeout(() => say('好香'), 400);
+    }, 1550);
+  }, 900);
+}
+function sayPick() { const r = Math.random(); return r < .6 ? '啾啾' : r < .8 ? '好香' : '摸摸'; }
+function sayRandom() { say(sayPick()); }
+$('feed').onclick = feed;
+$('random').onclick = () => { audio(); sayRandom(); };
+
+/* 閒置行為 */
+setInterval(() => setMood(mood - 1), 20000);
+(function idle() {
+  setTimeout(() => {
+    if (!speaking && document.visibilityState === 'visible') {
+      const r = Math.random();
+      if (r < mood / 160 && ac) sayRandom();
+      else if (r < .7) { chirp(1 + (Math.random() * 2 | 0)); tilt(); }
+      else tilt();
+    }
+    idle();
+  }, 7000 + Math.random() * 8000);
+})();
+
+setMood(mood);
+window.__b = { say, feed, get mood() { return mood; } };
+})();
+</script>
+</body>
+</html>

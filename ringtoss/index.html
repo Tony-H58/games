@@ -1,0 +1,375 @@
+<!DOCTYPE html>
+<html lang="zh-Hant">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1,maximum-scale=1,user-scalable=no">
+<title>夜市套圈圈</title>
+<style>
+  html,body{margin:0;height:100%;background:#120a1c;color:#fff4e0;font-family:system-ui,-apple-system,"PingFang TC","Noto Sans TC",sans-serif;overflow:hidden;touch-action:none;user-select:none;-webkit-user-select:none}
+  #hud{max-width:520px;margin:0 auto;display:flex;justify-content:space-between;align-items:center;padding:8px 12px 2px;font-size:12px}
+  #hud b{display:block;font-size:22px;font-variant-numeric:tabular-nums;color:#ffd166}
+  #rings{display:flex;gap:3px;flex-wrap:wrap;max-width:150px;justify-content:center}
+  #rings i{width:12px;height:12px;border-radius:50%;border:3px solid #ff5d8f;box-sizing:border-box}
+  #rings i.used{opacity:.18}
+  #msg{text-align:center;height:20px;font-size:14px;color:#ffd166}
+  #wrap{position:relative;display:flex;justify-content:center}
+  canvas{display:block;touch-action:none;border-radius:12px}
+  .ov{position:absolute;inset:0;display:flex;align-items:center;justify-content:center}
+  .box{background:#1d1029ee;border:1px solid #ffffff2a;border-radius:16px;padding:20px;width:min(310px,84%);text-align:center}
+  .box h2{margin:0 0 6px;font-size:30px;color:#ffd166;text-shadow:0 0 12px #ff9f1c88}
+  .box p{font-size:13px;opacity:.85;line-height:1.7;margin:6px 0 14px}
+  .go{width:100%;background:#ff5d8f;color:#fff;border:0;border-radius:10px;padding:13px;font-size:17px;font-weight:700}
+  #prizes{font-size:22px;line-height:1.5;margin:4px 0 10px;word-break:break-all}
+  [hidden]{display:none!important}
+</style>
+</head>
+<body>
+<div id="hud">
+  <div>分數<b id="score">0</b></div>
+  <div style="text-align:center">剩餘圈圈<div id="rings"></div></div>
+  <div style="text-align:right">最高分<b id="hi">0</b></div>
+</div>
+<div id="msg"></div>
+<div id="wrap">
+  <canvas id="c"></canvas>
+  <div class="ov" id="menu"><div class="box">
+    <h2>夜市套圈圈</h2>
+    <p>手指在畫面下方<b>按住往上滑</b>再放開，就能丟出圈圈。<br>滑越長丟越遠，往左右斜滑可以調方向。<br>圈圈要<b>完整套住底座</b>才算中！<br>連續套中有連擊加成，最後排中間是 <b>100 分大獎</b>。</p>
+    <button class="go" id="start">開始（10 個圈圈）</button>
+  </div></div>
+  <div class="ov" id="over" hidden><div class="box">
+    <h2 id="oTitle">結束！</h2>
+    <p id="oSub"></p>
+    <div id="prizes"></div>
+    <button class="go" id="again">再玩一次</button>
+  </div></div>
+</div>
+<script>
+(() => {
+const W = 400, H = 680, HZ = 165, F = 380, CAMH = 1.3, CX = 200;
+const RING_R = 0.12, RINGS = 10;
+const cv = document.getElementById('c'), ctx = cv.getContext('2d');
+let scale = 1, cssScale = 1;
+function resize() {
+  const top = document.getElementById('hud').offsetHeight + document.getElementById('msg').offsetHeight;
+  const s = Math.min((innerWidth - 10) / W, (innerHeight - top - 8) / H), d = window.devicePixelRatio || 1;
+  cssScale = s; cv.style.width = W * s + 'px'; cv.style.height = H * s + 'px';
+  cv.width = Math.round(W * s * d); cv.height = Math.round(H * s * d); scale = s * d;
+}
+addEventListener('resize', resize); resize();
+const proj = (x, z, h = 0) => ({ x: CX + F * x / z, y: HZ + F * (CAMH - h) / z, s: F / z });
+
+/* 音效 */
+let ac = null;
+function initAudio() { if (!ac) { try { ac = new (window.AudioContext || window.webkitAudioContext)(); } catch (e) {} } else if (ac.state === 'suspended') ac.resume(); }
+function tone(f, d, type = 'sine', v = .06, f2) {
+  if (!ac) return; const t = ac.currentTime, o = ac.createOscillator(), g = ac.createGain();
+  o.type = type; o.frequency.setValueAtTime(f, t); if (f2) o.frequency.exponentialRampToValueAtTime(f2, t + d);
+  g.gain.setValueAtTime(v, t); g.gain.exponentialRampToValueAtTime(.0001, t + d);
+  o.connect(g).connect(ac.destination); o.start(t); o.stop(t + d);
+}
+const sWhoosh = () => tone(500, .25, 'triangle', .04, 180);
+const sClack = () => { tone(900, .05, 'square', .03); setTimeout(() => tone(700, .05, 'square', .02), 70); };
+const sWin = big => { [660, 880, 1100, big ? 1480 : 0].forEach((f, i) => f && setTimeout(() => tone(f, .18, 'sine', .07), i * 90)); };
+
+/* 獎品 */
+const KINDS = {
+  can:    { name: '飲料罐', pts: 10, r: .045, emoji: '🥫' },
+  bottle: { name: '汽水瓶', pts: 10, r: .05,  emoji: '🍾' },
+  duck:   { name: '小鴨',   pts: 20, r: .055, emoji: '🐤' },
+  bear:   { name: '小熊',   pts: 30, r: .06,  emoji: '🧸' },
+  gold:   { name: '金瓶',   pts: 50, r: .05,  emoji: '🏆' },
+  big:    { name: '大獎',   pts: 100, r: .085, emoji: '🎁' },
+};
+const ROWS = [['can', 'bottle'], ['bottle', 'can'], ['duck'], ['bear'], ['gold']];
+const CAN_COLORS = ['#e63946', '#2a9d8f', '#f4a261', '#457b9d', '#8338ec'];
+let prizes = [], groundRings = [], flying = null, score = 0, left = RINGS, combo = 0, won = [], popups = [], state = 'menu', flyAway = [];
+let hi = 0; try { hi = +localStorage.getItem('ringTossHi') || 0; } catch (e) {}
+
+function setup() {
+  prizes = [];
+  ROWS.forEach((types, r) => {
+    const z = 1.8 + r * .42, n = r % 2 ? 5 : 6, sp = .3;
+    for (let c = 0; c < n; c++) {
+      const x = (c - (n - 1) / 2) * sp;
+      let kind = types[(c + r) % types.length];
+      if (r === 4 && c === 2) kind = 'big';
+      const k = KINDS[kind];
+      prizes.push({ x: x + (Math.random() - .5) * .03, z: z + (Math.random() - .5) * .04, kind, r: k.r, pts: k.pts, col: CAN_COLORS[(r * 7 + c) % CAN_COLORS.length], gone: false, ring: null, t: 0 });
+    }
+  });
+  // 大獎附近空出一點位子
+  prizes = prizes.filter(p => !(p.kind !== 'big' && prizes.some(q => q.kind === 'big' && q !== p && Math.hypot(q.x - p.x, q.z - p.z) < .2)));
+}
+function startGame() {
+  setup(); groundRings = []; flying = null; score = 0; left = RINGS; combo = 0; won = []; popups = []; flyAway = [];
+  state = 'play'; document.getElementById('menu').hidden = true; document.getElementById('over').hidden = true;
+  setMsg('按住往上滑，放開丟出圈圈'); hud();
+}
+function setMsg(t) { document.getElementById('msg').textContent = t; }
+function hud() {
+  document.getElementById('score').textContent = score;
+  document.getElementById('hi').textContent = hi;
+  document.getElementById('rings').innerHTML = Array.from({ length: RINGS }, (_, i) => `<i class="${i < RINGS - left ? 'used' : ''}"></i>`).join('');
+}
+
+/* 丟擲 */
+const RING_COLS = ['#ff5d8f', '#4cc9f0', '#ffd166', '#06d6a0', '#c77dff'];
+let drag = null;
+function target(dx, dy) {
+  const p = Math.max(0, dy) / (H * .5 * cssScale);
+  const zt = Math.min(4.6, Math.max(.9, .9 + p * 3.0));
+  const ang = Math.atan2(dx, Math.max(dy, 20));
+  const xt = Math.tan(Math.max(-.9, Math.min(.9, ang))) * zt * .55;
+  return { xt, zt };
+}
+function throwRing(xt, zt) {
+  const a = Math.random() * Math.PI * 2, e = Math.sqrt(Math.random()) * .045;   // 手感誤差
+  xt += Math.cos(a) * e; zt += Math.sin(a) * e * 1.4;
+  left--; hud();
+  flying = { x0: 0, z0: .7, h0: .5, xt, zt, u: 0, T: .55 + zt * .13, arc: .25 + zt * .16, col: RING_COLS[(RINGS - left) % RING_COLS.length], spin: 0 };
+  sWhoosh();
+}
+cv.addEventListener('pointerdown', e => {
+  initAudio();
+  if (state !== 'play' || flying || left <= 0) return;
+  cv.setPointerCapture(e.pointerId);
+  drag = { x0: e.clientX, y0: e.clientY, x: e.clientX, y: e.clientY };
+});
+cv.addEventListener('pointermove', e => { if (drag) { drag.x = e.clientX; drag.y = e.clientY; } });
+cv.addEventListener('pointerup', e => {
+  if (!drag) return;
+  const dx = e.clientX - drag.x0, dy = drag.y0 - e.clientY; drag = null;
+  if (dy < 25 * cssScale) { setMsg('要往上滑才能丟喔'); return; }
+  const t = target(dx, dy); throwRing(t.xt, t.zt);
+});
+cv.addEventListener('pointercancel', () => drag = null);
+
+function land(f) {
+  let x = f.xt, z = f.zt;
+  const near = prizes.filter(p => !p.gone && !p.ring);
+  const inside = near.filter(p => Math.hypot(p.x - x, p.z - z) + p.r <= RING_R);
+  const touching = near.filter(p => { const d = Math.hypot(p.x - x, p.z - z); return d < RING_R + p.r && d + p.r > RING_R; });
+  if (inside.length && !touching.length) {
+    const p = inside.sort((a, b) => b.pts - a.pts)[0];
+    combo++;
+    const mult = Math.min(3, 1 + .5 * (combo - 1));
+    const gain = Math.round(p.pts * mult);
+    score += gain; p.ring = { col: f.col, dx: x - p.x, dz: z - p.z }; p.t = 0; won.push(p);
+    popups.push({ x: p.x, z: p.z, h: .35, t: 1.2, s: `+${gain}`, big: p.kind === 'big' });
+    setMsg(p.kind === 'big' ? '🎉 套中大獎！' : `套中${KINDS[p.kind].name}！` + (combo > 1 ? ` 連擊 ${combo}（×${mult}）` : ''));
+    sWin(p.kind === 'big');
+  } else {
+    combo = 0;
+    if (touching.length || near.some(p => Math.hypot(p.x - x, p.z - z) < p.r)) {
+      // 壓到邊緣：彈開
+      for (let it = 0; it < 6; it++) for (const p of near) {
+        let dx = x - p.x, dz = z - p.z, d = Math.hypot(dx, dz);
+        if (d < RING_R + p.r + .005) { if (d < 1e-4) { dx = Math.random() - .5; dz = -.5; d = Math.hypot(dx, dz); } x = p.x + dx / d * (RING_R + p.r + .01); z = p.z + dz / d * (RING_R + p.r + .01); }
+      }
+      setMsg('差一點！壓到邊了');
+    } else setMsg(left > 0 ? '沒套到，再試一次' : '');
+    groundRings.push({ x, z, col: f.col, fx: f.xt, fz: f.zt, b: 0 });
+    sClack();
+  }
+  score > hi && (hi = score, (() => { try { localStorage.setItem('ringTossHi', hi); } catch (e) {} })());
+  hud();
+  if (left <= 0) setTimeout(endGame, 1300);
+}
+function endGame() {
+  state = 'over';
+  document.getElementById('oTitle').textContent = score >= 150 ? '夜市之王！👑' : score >= 60 ? '手感不錯！' : '再接再厲！';
+  document.getElementById('oSub').textContent = `總分 ${score}　套中 ${won.length} / ${RINGS}　最高分 ${hi}`;
+  document.getElementById('prizes').innerHTML = won.length ? won.map(p => KINDS[p.kind].emoji).join(' ') : '<span style="font-size:14px;opacity:.7">這次沒套到獎品</span>';
+  document.getElementById('over').hidden = false; setMsg('');
+}
+
+/* 更新 */
+function update(dt) {
+  if (flying) {
+    const f = flying; f.u += dt / f.T; f.spin += dt * 11;
+    if (f.u >= 1) { flying = null; land(f); }
+  }
+  groundRings.forEach(g => g.b = Math.min(1, g.b + dt * 4));
+  popups.forEach(p => { p.t -= dt; p.h += dt * .25; }); popups = popups.filter(p => p.t > 0);
+  prizes.forEach(p => { if (p.ring && !p.gone) { p.t += dt; if (p.t > 1.1) { p.gone = true; flyAway.push({ p, t: 0 }); } } });
+  flyAway.forEach(a => a.t += dt); flyAway = flyAway.filter(a => a.t < .7);
+}
+
+/* 繪圖：背景 */
+const bg = document.createElement('canvas'); bg.width = W * 2; bg.height = H * 2;
+(() => {
+  const g = bg.getContext('2d'); g.scale(2, 2);
+  const sky = g.createLinearGradient(0, 0, 0, HZ); sky.addColorStop(0, '#1b0f2e'); sky.addColorStop(1, '#3a1b3f');
+  g.fillStyle = sky; g.fillRect(0, 0, W, HZ);
+  // 攤位後牆
+  const WB = proj(0, 4.0).y;
+  for (let x = 0; x < W; x += 20) { g.fillStyle = x % 40 ? '#651f31' : '#53192a'; g.fillRect(x, 70, 20, WB - 70); }
+  const sh = g.createLinearGradient(0, WB - 60, 0, WB); sh.addColorStop(0, 'rgba(0,0,0,0)'); sh.addColorStop(1, 'rgba(0,0,0,.45)');
+  g.fillStyle = sh; g.fillRect(0, WB - 60, W, 60);
+  // 帆布頂
+  for (let i = 0; i < 10; i++) {
+    g.fillStyle = i % 2 ? '#f1faee' : '#e63946';
+    g.beginPath(); g.moveTo(i * 40, 0); g.lineTo(i * 40 + 40, 0); g.lineTo(i * 40 + 40, 46); g.quadraticCurveTo(i * 40 + 20, 62, i * 40, 46); g.closePath(); g.fill();
+  }
+  // 招牌
+  g.fillStyle = '#ffd166'; g.shadowColor = '#ff9f1c'; g.shadowBlur = 16;
+  g.font = '900 34px "PingFang TC","Noto Sans TC",system-ui'; g.textAlign = 'center'; g.textBaseline = 'middle';
+  g.fillText('套 圈 圈', W / 2, 108); g.shadowBlur = 0;
+  g.font = '600 12px system-ui'; g.fillStyle = '#ffe8b0'; g.fillText('一次 10 圈・套中就送', W / 2, 138);
+  // 地面
+  const fl = g.createLinearGradient(0, WB, 0, H); fl.addColorStop(0, '#3b2a22'); fl.addColorStop(1, '#1d1410');
+  g.fillStyle = fl; g.fillRect(0, WB, W, H - WB);
+  // 綠色地墊
+  const z0 = 1.45, z1 = 4.0, xm = 1.02;
+  const a = proj(-xm, z1), b = proj(xm, z1), c = proj(xm, z0), d = proj(-xm, z0);
+  const mat = g.createLinearGradient(0, a.y, 0, c.y); mat.addColorStop(0, '#1f5f3f'); mat.addColorStop(1, '#2d8a57');
+  g.fillStyle = mat; g.beginPath(); g.moveTo(a.x, a.y); g.lineTo(b.x, b.y); g.lineTo(c.x, c.y); g.lineTo(d.x, d.y); g.closePath(); g.fill();
+  g.strokeStyle = '#f1faee88'; g.lineWidth = 2; g.stroke();
+  // 丟擲線
+  const l1 = proj(-1.2, 1.05), l2 = proj(1.2, 1.05);
+  g.strokeStyle = '#ffd16699'; g.setLineDash([10, 8]); g.lineWidth = 3; g.beginPath(); g.moveTo(l1.x, l1.y); g.lineTo(l2.x, l2.y); g.stroke(); g.setLineDash([]);
+})();
+let bulbT = 0;
+function drawBulbs() {
+  for (let i = 0; i < 16; i++) {
+    const x = 12 + i * 25.1, y = 62 + Math.sin(i * .9) * 3, on = (Math.floor(bulbT * 3) + i) % 3 !== 0;
+    ctx.fillStyle = on ? ['#ffd166', '#ff5d8f', '#4cc9f0'][i % 3] : '#555';
+    ctx.shadowColor = ctx.fillStyle; ctx.shadowBlur = on ? 10 : 0;
+    ctx.beginPath(); ctx.arc(x, y, 3.5, 0, Math.PI * 2); ctx.fill();
+  }
+  ctx.shadowBlur = 0;
+}
+
+/* 繪圖：獎品 */
+function drawPrize(p, lift = 0, alpha = 1) {
+  const q = proj(p.x, p.z), s = q.s, bx = q.x, by = q.y - lift * s;
+  ctx.save(); ctx.globalAlpha = alpha;
+  ctx.fillStyle = 'rgba(0,0,0,.3)'; ctx.beginPath(); ctx.ellipse(q.x, q.y, p.r * s * 1.2, p.r * s * .45, 0, 0, Math.PI * 2); ctx.fill();
+  const k = p.kind;
+  if (k === 'can') {
+    const w = .09 * s, h = .15 * s;
+    ctx.fillStyle = p.col; ctx.fillRect(bx - w / 2, by - h, w, h);
+    ctx.fillStyle = 'rgba(255,255,255,.85)'; ctx.fillRect(bx - w / 2, by - h * .62, w, h * .2);
+    ctx.fillStyle = 'rgba(255,255,255,.25)'; ctx.fillRect(bx - w * .3, by - h, w * .15, h);
+    ctx.fillStyle = '#ccc'; ctx.beginPath(); ctx.ellipse(bx, by - h, w / 2, w * .18, 0, 0, Math.PI * 2); ctx.fill();
+  } else if (k === 'bottle' || k === 'gold') {
+    const w = .1 * s, h = .17 * s, nw = .035 * s, nh = .1 * s;
+    const col = k === 'gold' ? '#e9b949' : '#3a8f5c';
+    ctx.fillStyle = col;
+    ctx.beginPath(); ctx.moveTo(bx - w / 2, by); ctx.lineTo(bx - w / 2, by - h); ctx.quadraticCurveTo(bx - w / 2, by - h - nh * .4, bx - nw / 2, by - h - nh * .5);
+    ctx.lineTo(bx - nw / 2, by - h - nh); ctx.lineTo(bx + nw / 2, by - h - nh); ctx.lineTo(bx + nw / 2, by - h - nh * .5);
+    ctx.quadraticCurveTo(bx + w / 2, by - h - nh * .4, bx + w / 2, by - h); ctx.lineTo(bx + w / 2, by); ctx.closePath(); ctx.fill();
+    ctx.fillStyle = 'rgba(255,255,255,.35)'; ctx.fillRect(bx - w * .32, by - h * .95, w * .14, h * .85);
+    ctx.fillStyle = k === 'gold' ? '#fff3c4' : '#f1faee'; ctx.fillRect(bx - w / 2, by - h * .65, w, h * .28);
+    ctx.fillStyle = '#e63946'; ctx.fillRect(bx - nw * .65, by - h - nh - .02 * s, nw * 1.3, .025 * s);
+    if (k === 'gold') { ctx.fillStyle = '#b07d10'; ctx.font = `700 ${Math.max(7, .06 * s)}px system-ui`; ctx.textAlign = 'center'; ctx.textBaseline = 'middle'; ctx.fillText('50', bx, by - h * .51); }
+  } else if (k === 'duck') {
+    const r = .06 * s;
+    ctx.fillStyle = '#ffd60a'; ctx.beginPath(); ctx.ellipse(bx, by - r * .9, r * 1.1, r * .85, 0, 0, Math.PI * 2); ctx.fill();
+    ctx.beginPath(); ctx.arc(bx + r * .35, by - r * 2, r * .6, 0, Math.PI * 2); ctx.fill();
+    ctx.fillStyle = '#fb8500'; ctx.beginPath(); ctx.moveTo(bx + r * .85, by - r * 2.05); ctx.lineTo(bx + r * 1.35, by - r * 1.9); ctx.lineTo(bx + r * .85, by - r * 1.75); ctx.fill();
+    ctx.fillStyle = '#222'; ctx.beginPath(); ctx.arc(bx + r * .5, by - r * 2.15, r * .1, 0, Math.PI * 2); ctx.fill();
+  } else if (k === 'bear') {
+    const r = .065 * s;
+    ctx.fillStyle = '#b5835a';
+    ctx.beginPath(); ctx.ellipse(bx, by - r, r, r * 1.05, 0, 0, Math.PI * 2); ctx.fill();
+    ctx.beginPath(); ctx.arc(bx, by - r * 2.5, r * .78, 0, Math.PI * 2); ctx.fill();
+    ctx.beginPath(); ctx.arc(bx - r * .6, by - r * 3.1, r * .3, 0, Math.PI * 2); ctx.arc(bx + r * .6, by - r * 3.1, r * .3, 0, Math.PI * 2); ctx.fill();
+    ctx.fillStyle = '#e9c9a8'; ctx.beginPath(); ctx.ellipse(bx, by - r * 2.3, r * .35, r * .26, 0, 0, Math.PI * 2); ctx.fill();
+    ctx.beginPath(); ctx.ellipse(bx, by - r, r * .55, r * .6, 0, 0, Math.PI * 2); ctx.fill();
+    ctx.fillStyle = '#222'; ctx.beginPath(); ctx.arc(bx - r * .28, by - r * 2.65, r * .09, 0, Math.PI * 2); ctx.arc(bx + r * .28, by - r * 2.65, r * .09, 0, Math.PI * 2); ctx.fill();
+    ctx.fillStyle = '#e63946'; ctx.fillRect(bx - r * .45, by - r * 1.95, r * .9, r * .18);
+  } else if (k === 'big') {
+    const w = .17 * s, h = .2 * s;
+    ctx.fillStyle = '#ffbe0b'; ctx.fillRect(bx - w / 2, by - h, w, h);
+    ctx.fillStyle = '#ff006e'; ctx.fillRect(bx - w * .1, by - h, w * .2, h); ctx.fillRect(bx - w / 2, by - h * .6, w, h * .16);
+    ctx.beginPath(); ctx.ellipse(bx - w * .18, by - h - h * .1, w * .2, h * .12, -.4, 0, Math.PI * 2); ctx.ellipse(bx + w * .18, by - h - h * .1, w * .2, h * .12, .4, 0, Math.PI * 2); ctx.fill();
+    ctx.fillStyle = '#fff'; ctx.font = `900 ${Math.max(8, .055 * s)}px system-ui`; ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
+    ctx.shadowColor = '#000'; ctx.shadowBlur = 3; ctx.fillText('大獎', bx, by - h * .28); ctx.shadowBlur = 0;
+    const gl = (Math.sin(bulbT * 4) + 1) / 2;
+    ctx.strokeStyle = `rgba(255,240,150,${.3 + gl * .5})`; ctx.lineWidth = 2; ctx.strokeRect(bx - w / 2 - 2, by - h - 2, w + 4, h + 4);
+  }
+  ctx.restore();
+}
+function ringEllipse(x, z, h, col, tiltMul = 1, part = 'all', alpha = 1) {
+  const q = proj(x, z, h), rx = RING_R * q.s;
+  const vh = CAMH - h, ry = Math.max(rx * .08, rx * vh / Math.hypot(z, vh) * tiltMul);
+  ctx.save(); ctx.globalAlpha = alpha;
+  const lw = Math.max(2, .022 * q.s);
+  const a0 = part === 'front' ? 0 : part === 'back' ? Math.PI : 0, a1 = part === 'back' ? Math.PI * 2 : part === 'front' ? Math.PI : Math.PI * 2;
+  ctx.strokeStyle = 'rgba(0,0,0,.35)'; ctx.lineWidth = lw + 2;
+  ctx.beginPath(); ctx.ellipse(q.x, q.y, rx, Math.abs(ry), 0, a0, a1); ctx.stroke();
+  ctx.strokeStyle = col; ctx.lineWidth = lw;
+  ctx.beginPath(); ctx.ellipse(q.x, q.y, rx, Math.abs(ry), 0, a0, a1); ctx.stroke();
+  ctx.strokeStyle = 'rgba(255,255,255,.45)'; ctx.lineWidth = lw * .35;
+  ctx.beginPath(); ctx.ellipse(q.x, q.y - lw * .2, rx, Math.abs(ry), 0, a0, a1); ctx.stroke();
+  ctx.restore();
+}
+
+function draw() {
+  ctx.setTransform(scale, 0, 0, scale, 0, 0);
+  ctx.drawImage(bg, 0, 0, W, H);
+  drawBulbs();
+  // 依深度排序
+  const items = [];
+  groundRings.forEach(g => items.push({ z: g.z + .001, f: () => {
+    const hop = g.b < 1 ? Math.sin(g.b * Math.PI) * .05 : 0;
+    const x = g.fx + (g.x - g.fx) * g.b, z = g.fz + (g.z - g.fz) * g.b;
+    ringEllipse(x, z, hop, g.col);
+  } }));
+  prizes.forEach(p => { if (p.gone) return;
+    if (p.ring) {
+      const drop = Math.min(1, p.t * 3), h = .14 * (1 - drop) + .02;
+      items.push({ z: p.z + .0005, f: () => ringEllipse(p.x + p.ring.dx * drop * .4, p.z + p.ring.dz * drop * .4, h, p.ring.col, 1, 'back') });
+      items.push({ z: p.z, f: () => drawPrize(p) });
+      items.push({ z: p.z - .0005, f: () => ringEllipse(p.x + p.ring.dx * drop * .4, p.z + p.ring.dz * drop * .4, h, p.ring.col, 1, 'front') });
+    } else items.push({ z: p.z, f: () => drawPrize(p) });
+  });
+  if (flying) {
+    const f = flying, u = f.u;
+    const x = f.x0 + (f.xt - f.x0) * u, z = f.z0 + (f.zt - f.z0) * u;
+    const h = f.h0 * (1 - u) + f.arc * 4 * u * (1 - u);
+    // 落地前才和獎品比深度，空中時畫在最前面
+    items.push({ z: h > .3 ? -1 : z - .002, f: () => {
+      const sh = proj(x, z, 0); ctx.fillStyle = 'rgba(0,0,0,.25)';
+      ctx.beginPath(); ctx.ellipse(sh.x, sh.y, RING_R * sh.s, RING_R * sh.s * .3, 0, 0, Math.PI * 2); ctx.fill();
+      ringEllipse(x, z, h, f.col, .55 + .45 * Math.cos(f.spin));
+    } });
+  }
+  items.sort((a, b) => b.z - a.z).forEach(i => i.f());
+  // 得到的獎品飛走
+  flyAway.forEach(a => drawPrize(a.p, a.t * 1.2, 1 - a.t / .7));
+  // 手上的圈圈 & 瞄準
+  if (state === 'play' && !flying && left > 0) {
+    if (drag) {
+      const dx = drag.x - drag.x0, dy = drag.y0 - drag.y;
+      if (dy > 10) {
+        const t = target(dx, dy), q = proj(t.xt, t.zt);
+        ctx.strokeStyle = 'rgba(255,255,255,.45)'; ctx.setLineDash([4, 4]); ctx.lineWidth = 1.5;
+        ctx.beginPath(); ctx.ellipse(q.x, q.y, RING_R * q.s, RING_R * q.s * .35, 0, 0, Math.PI * 2); ctx.stroke(); ctx.setLineDash([]);
+      }
+    }
+    const lift = drag ? Math.min(.05, Math.max(0, (drag.y0 - drag.y) / cssScale / 3000)) : 0;
+    ringEllipse(0, .7, .5 + lift, RING_COLS[(RINGS - left + 1) % RING_COLS.length]);
+  }
+  // 浮字
+  popups.forEach(p => {
+    const q = proj(p.x, p.z, p.h);
+    ctx.globalAlpha = Math.min(1, p.t * 2); ctx.fillStyle = p.big ? '#ffd166' : '#fff';
+    ctx.font = `900 ${p.big ? 28 : 20}px system-ui`; ctx.textAlign = 'center'; ctx.shadowColor = '#000'; ctx.shadowBlur = 4;
+    ctx.fillText(p.s, q.x, q.y); ctx.shadowBlur = 0; ctx.globalAlpha = 1;
+  });
+}
+
+let last = performance.now();
+function loop(t) { const dt = Math.min(.033, (t - last) / 1000); last = t; bulbT += dt; update(dt); draw(); requestAnimationFrame(loop); }
+setup(); hud();
+document.getElementById('start').onclick = () => { initAudio(); startGame(); };
+document.getElementById('again').onclick = () => { initAudio(); startGame(); };
+requestAnimationFrame(loop);
+window.__rt = { get prizes() { return prizes; }, throwRing, get state() { return state; }, get score() { return score; }, get left() { return left; }, get flying() { return flying; }, startGame };
+})();
+</script>
+</body>
+</html>

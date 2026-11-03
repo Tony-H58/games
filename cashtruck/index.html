@@ -1,0 +1,549 @@
+<!DOCTYPE html>
+<html lang="zh-Hant">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1,maximum-scale=1,user-scalable=no">
+<title>守護運鈔車</title>
+<style>
+  html,body{margin:0;height:100%;background:#0f172a;color:#f1f5f9;font-family:system-ui,-apple-system,"PingFang TC","Noto Sans TC",sans-serif;overflow:hidden;touch-action:none;user-select:none;-webkit-user-select:none}
+  #app{max-width:520px;margin:0 auto;height:100%;display:flex;flex-direction:column}
+  #hud{display:flex;justify-content:space-between;align-items:center;padding:8px 12px 2px;font-size:11px;gap:8px}
+  #hud b{display:block;font-size:19px;color:#fbbf24;font-variant-numeric:tabular-nums}
+  #hpw{flex:1.4}
+  #hpbar{height:10px;background:#ffffff22;border-radius:5px;overflow:hidden;margin-top:4px}
+  #hpbar i{display:block;height:100%;width:100%;background:linear-gradient(90deg,#ef4444,#f59e0b,#22c55e);transition:width .2s}
+  #tip{text-align:center;font-size:13px;height:18px;color:#fbbf24}
+  #wrap{position:relative;flex:1;min-height:0;display:flex;justify-content:center;align-items:center}
+  canvas{display:block;touch-action:none;border-radius:12px}
+  #ctrl{display:flex;gap:8px;padding:6px 12px 14px;min-height:52px}
+  #ctrl button{flex:1;border:0;border-radius:12px;font-size:16px;font-weight:800;color:#fff;padding:12px 4px;background:#334155;position:relative;overflow:hidden}
+  #ctrl button:disabled{opacity:.4}
+  #ctrl button i{position:absolute;left:0;bottom:0;height:4px;background:#fbbf24}
+  #ammo{flex:1;display:flex;align-items:center;justify-content:center;gap:4px;font-size:13px}
+  #ammo span{width:7px;height:20px;border-radius:3px 3px 1px 1px;background:linear-gradient(#fbbf24 30%,#94a3b8 30%)}
+  #ammo span.used{opacity:.15}
+  .ov{position:absolute;inset:0;display:flex;align-items:center;justify-content:center;z-index:5}
+  .box{background:#111827f0;border:2px solid #fbbf24;border-radius:16px;padding:18px;width:min(320px,88%);text-align:center}
+  .box h2{margin:0 0 6px;font-size:26px;color:#fbbf24}
+  .box p{font-size:13px;line-height:1.7;margin:6px 0 10px;text-align:left}
+  .btn{width:100%;background:#2563eb;color:#fff;border:0;border-radius:12px;padding:12px;font-size:16px;font-weight:800;margin-top:6px}
+  .btn.sec{background:#334155}
+  .stats{display:grid;grid-template-columns:1fr 1fr;gap:6px;margin:8px 0 10px}
+  .stats div{background:#0006;border-radius:10px;padding:7px;font-size:11px}
+  .stats b{display:block;font-size:18px;color:#fbbf24}
+  .stars{font-size:34px;letter-spacing:4px;margin:4px 0}
+  [hidden]{display:none!important}
+</style>
+</head>
+<body>
+<div id="app">
+  <div id="hud">
+    <div>關卡<b id="hLv">1</b></div>
+    <div>分數<b id="hScore">0</b></div>
+    <div id="hpw">運鈔車耐久<div id="hpbar"><i></i></div></div>
+    <div style="text-align:right">階段<b id="hPhase" style="font-size:15px">—</b></div>
+  </div>
+  <div id="tip"></div>
+  <div id="wrap">
+    <canvas id="c"></canvas>
+    <div class="ov" id="menu"><div class="box">
+      <h2>🚚 守護運鈔車</h2>
+      <p><b>第一段・護送</b>：拖動手指開警車，撞開衝向運鈔車的搶匪車、機車，順便撞掉前方路障。🚨 警笛可以嚇退附近的搶匪，🚁 直升機支援每關一次。<br>
+      <b>第二段・銀行門口</b>：到了銀行，搶匪已經埋伏！<b>按住開鏡、拖動瞄準、放開開槍</b>，把探頭的搶匪擊倒。清空後運鈔員會推錢箱走進銀行，途中衝出來的搶匪也要擋下。<br>
+      ⚠️ 別打到運鈔員和路人，誤射 2 次就失敗。🦺 穿防彈背心的老大要打頭。</p>
+      <button class="btn" id="start">出發！</button>
+      <p id="bestTxt" style="text-align:center;font-size:12px;opacity:.75;margin-top:8px"></p>
+    </div></div>
+    <div class="ov" id="result" hidden><div class="box">
+      <h2 id="rTitle"></h2><div class="stars" id="rStars"></div>
+      <div class="stats" id="rStats"></div>
+      <button class="btn" id="rNext"></button>
+      <button class="btn sec" id="rMenu">回主選單</button>
+    </div></div>
+  </div>
+  <div id="ctrl">
+    <button id="siren">🚨 警笛<i></i></button>
+    <button id="heli">🚁 支援 ×1</button>
+    <div id="ammo" hidden></div>
+  </div>
+</div>
+<script>
+(() => {
+const $ = id => document.getElementById(id);
+const W = 400, H = 620, LEVELS = 5;
+const cv = $('c'), ctx = cv.getContext('2d');
+let scale = 1;
+function resize() {
+  const wr = $('wrap').getBoundingClientRect();
+  const s = Math.min((wr.width - 4) / W, (wr.height - 4) / H), d = window.devicePixelRatio || 1;
+  cv.style.width = W * s + 'px'; cv.style.height = H * s + 'px';
+  cv.width = Math.round(W * s * d); cv.height = Math.round(H * s * d); scale = s * d;
+}
+addEventListener('resize', resize);
+
+/* ---------- 音效 ---------- */
+let ac = null;
+function initAudio() { if (!ac) { try { ac = new (window.AudioContext || window.webkitAudioContext)(); } catch (e) {} } else if (ac.state === 'suspended') ac.resume(); }
+function tone(f, d, type = 'sine', v = .06, f2, delay = 0) { if (!ac) return; const t = ac.currentTime + delay, o = ac.createOscillator(), g = ac.createGain(); o.type = type; o.frequency.setValueAtTime(f, t); if (f2) o.frequency.exponentialRampToValueAtTime(f2, t + d); g.gain.setValueAtTime(v, t); g.gain.exponentialRampToValueAtTime(.0001, t + d); o.connect(g).connect(ac.destination); o.start(t); o.stop(t + d + .02); }
+function noise(d, v, lp, decay = 3) { if (!ac) return; const n = ac.sampleRate * d, b = ac.createBuffer(1, n, ac.sampleRate), x = b.getChannelData(0); for (let i = 0; i < n; i++) x[i] = (Math.random() * 2 - 1) * Math.pow(1 - i / n, decay); const s = ac.createBufferSource(), f = ac.createBiquadFilter(), g = ac.createGain(); s.buffer = b; f.type = 'lowpass'; f.frequency.value = lp; g.gain.value = v; s.connect(f).connect(g).connect(ac.destination); s.start(); }
+const sCrash = () => { noise(.35, .6, 1800); tone(90, .3, 'square', .08, 45); };
+const sSiren = () => { for (let i = 0; i < 4; i++) { tone(700, .25, 'sawtooth', .04, 1000, i * .5); tone(1000, .25, 'sawtooth', .04, 700, i * .5 + .25); } };
+const sHeli = () => { for (let i = 0; i < 16; i++) noise(.05, .25, 400, 1, i * .07); };
+const sShot = () => { noise(.5, .9, 3000, 5); tone(70, .3, 'sine', .3, 35); };
+const sClick = () => tone(1800, .03, 'square', .05);
+const sReload = () => { tone(900, .05, 'square', .05, null, .2); tone(600, .06, 'square', .05, null, .7); tone(1200, .05, 'square', .06, null, 1.2); };
+const sDown = () => { tone(400, .3, 'triangle', .07, 150); };
+const sClang = () => { tone(1800, .12, 'square', .05, 1400); };
+const sWin = () => [523, 659, 784, 1047].forEach((f, i) => tone(f, .18, 'sine', .07, null, i * .1));
+const sFail = () => [392, 330, 262].forEach((f, i) => tone(f, .3, 'triangle', .07, null, i * .18));
+const vib = ms => { try { navigator.vibrate && navigator.vibrate(ms); } catch (e) {} };
+
+/* ---------- 共用狀態 ---------- */
+let state = 'menu', level = 1, score = 0, hp = 100, t = 0, fx = [], shake = 0;
+let lv = {};   // 這一關的統計
+let best = { level: 0, score: 0 }; try { best = JSON.parse(localStorage.getItem('cashTruckBest') || '{"level":0,"score":0}'); } catch (e) {}
+function setTip(s) { $('tip').textContent = s; }
+function hud() {
+  $('hLv').textContent = level; $('hScore').textContent = score;
+  $('hpbar').firstElementChild.style.width = Math.max(0, hp) + '%';
+  $('hPhase').textContent = { escort: '① 護送', snipe: '② 狙擊', walk: '② 進銀行', intro: '抵達中', menu: '—', result: '結算' }[state] || '—';
+}
+function damage(n, x, y) {
+  hp = Math.max(0, hp - n); shake = .6; vib(60);
+  fx.push({ x, y, t: .9, s: `-${n}`, col: '#ef4444' }); hud();
+  if (hp <= 0) fail('運鈔車被搶了！');
+}
+
+/* =================== 第一段：護送 =================== */
+const ROAD = { l: 96, r: 304 }, LANES = [130, 200, 270];
+let truck, cop, robbers, obstacles, esc, sirenCd = 0, heliLeft = 1, heli = null, drag = null, sirenFx = 0;
+function startEscort() {
+  state = 'escort'; t = 0; fx = [];
+  truck = { x: 200, y: 380, lane: 1, tx: 200, hitCd: 0 };
+  cop = { x: 200, y: 520, tx: 200, ty: 520, ang: 0 };
+  robbers = []; obstacles = []; sirenCd = 0; heliLeft = 1; heli = null; sirenFx = 0;
+  esc = { dist: 0, total: 220 * (38 + level * 4), scroll: 220, spawnT: 2, obT: 3, roadOff: 0 };
+  $('siren').hidden = false; $('heli').hidden = false; $('ammo').hidden = true; updateTools();
+  setTip('拖動手指開警車，撞開搶匪車！'); hud();
+}
+function updateTools() {
+  $('siren').disabled = sirenCd > 0; $('siren').querySelector('i').style.width = (sirenCd > 0 ? (1 - sirenCd / 7) * 100 : 100) + '%';
+  $('heli').disabled = heliLeft <= 0 || !robbers.some(r => r.state === 'chase'); $('heli').textContent = `🚁 支援 ×${heliLeft}`;
+}
+$('siren').onclick = () => {
+  if (state !== 'escort' || sirenCd > 0) return; initAudio(); sSiren(); sirenCd = 7; sirenFx = 1.2;
+  for (const r of robbers) if (Math.hypot(r.x - cop.x, r.y - cop.y) < 170 && r.state === 'chase') { r.state = 'flee'; r.ft = 1.8; }
+  updateTools();
+};
+$('heli').onclick = () => {
+  if (state !== 'escort' || heliLeft <= 0) return; initAudio();
+  const target = robbers.filter(r => r.state === 'chase').sort((a, b) => Math.hypot(a.x - truck.x, a.y - truck.y) - Math.hypot(b.x - truck.x, b.y - truck.y))[0];
+  if (!target) return; heliLeft--; sHeli(); heli = { x: -60, y: target.y - 80, target, t: 0 }; updateTools();
+};
+function spawnRobber() {
+  const bike = Math.random() < .3 + level * .04, fromBack = Math.random() < .65;
+  const x = LANES[(Math.random() * 3) | 0] + (Math.random() - .5) * 20;
+  robbers.push({ x, y: fromBack ? H + 60 : -60, vx: 0, vy: fromBack ? -140 : 60, bike, state: 'chase', ft: 0, spin: 0, hitCd: 0, side: Math.random() < .5 ? -1 : 1, col: ['#111827', '#7c2d12', '#4c1d95', '#374151'][(Math.random() * 4) | 0] });
+}
+function updateEscort(dt) {
+  esc.dist += esc.scroll * dt; esc.roadOff = (esc.roadOff + esc.scroll * dt) % 60;
+  sirenCd = Math.max(0, sirenCd - dt); sirenFx = Math.max(0, sirenFx - dt); truck.hitCd = Math.max(0, truck.hitCd - dt);
+  // 生成
+  esc.spawnT -= dt;
+  const maxR = 1 + Math.ceil(level * .7) + (esc.dist / esc.total > .5 ? 1 : 0);
+  if (esc.spawnT <= 0 && esc.dist < esc.total - 600) { if (robbers.filter(r => r.state !== 'out').length < maxR) spawnRobber(); esc.spawnT = Math.max(1.4, 4 - level * .4) * (.7 + Math.random() * .6); }
+  esc.obT -= dt;
+  if (esc.obT <= 0 && esc.dist < esc.total - 900) { obstacles.push({ x: LANES[(Math.random() * 3) | 0], y: -40, kind: Math.random() < .5 ? 'cone' : 'spike' }); esc.obT = 3.5 + Math.random() * 3 - level * .3; }
+  // 警車跟手指
+  cop.x += (cop.tx - cop.x) * Math.min(1, dt * 9); cop.y += (cop.ty - cop.y) * Math.min(1, dt * 9);
+  cop.ang = Math.max(-.4, Math.min(.4, (cop.tx - cop.x) * .02));
+  // 運鈔車：自動避開前方路障
+  const ahead = obstacles.filter(o => o.y < truck.y - 30 && o.y > truck.y - 260);
+  if (ahead.some(o => Math.abs(o.x - LANES[truck.lane]) < 30)) {
+    const options = [truck.lane - 1, truck.lane + 1].filter(l => l >= 0 && l <= 2 && !ahead.some(o => Math.abs(o.x - LANES[l]) < 30));
+    if (options.length && Math.random() < dt * 2.5) truck.lane = options[(Math.random() * options.length) | 0];
+  }
+  truck.x += (LANES[truck.lane] - truck.x) * Math.min(1, dt * 2.2);
+  // 路障
+  for (const o of obstacles) {
+    o.y += esc.scroll * dt;
+    if (!o.gone && Math.abs(o.x - cop.x) < 30 && Math.abs(o.y - cop.y) < 38) { o.gone = true; score += 30; lv.obst++; fx.push({ x: o.x, y: o.y, t: .6, s: '+30', col: '#fde68a' }); noise(.15, .3, 2500); }
+    if (!o.gone && Math.abs(o.x - truck.x) < 32 && Math.abs(o.y - truck.y) < 50) { o.gone = true; damage(o.kind === 'spike' ? 14 : 8, truck.x, truck.y - 50); setTip(o.kind === 'spike' ? '運鈔車壓到釘刺了！' : '撞到路障了！'); }
+  }
+  obstacles = obstacles.filter(o => o.y < H + 50 && !o.gone);
+  // 搶匪
+  for (const r of robbers) {
+    r.hitCd = Math.max(0, r.hitCd - dt);
+    if (r.state === 'chase') {
+      const tx = truck.x + r.side * 46, ty = truck.y + 10, dx = tx - r.x, dy = ty - r.y, d = Math.hypot(dx, dy) || 1;
+      const sp = (r.bike ? 210 : 165) * (1 + level * .06);
+      r.vx += (dx / d * sp - r.vx) * dt * 2.2; r.vy += (dy / d * sp - r.vy) * dt * 2.2;
+      if (d < 70 && Math.random() < dt * .8) r.side *= -1;
+    } else if (r.state === 'flee') { r.ft -= dt; r.vy += 260 * dt; r.vx += Math.sign(r.x - cop.x) * 120 * dt; if (r.ft <= 0) r.state = 'chase'; }
+    else if (r.state === 'spin') { r.spin += dt * 14; r.ft -= dt; if (r.ft <= 0) r.state = 'out'; }
+    r.x += r.vx * dt; r.y += r.vy * dt;
+    if (r.state !== 'spin') r.x = Math.max(ROAD.l + 14, Math.min(ROAD.r - 14, r.x));
+    // 撞運鈔車
+    if ((r.state === 'chase') && Math.abs(r.x - truck.x) < (r.bike ? 30 : 40) && Math.abs(r.y - truck.y) < 58 && r.hitCd <= 0 && truck.hitCd <= 0) {
+      damage(r.bike ? 7 : 12, truck.x, truck.y - 40); r.hitCd = 1.2; truck.hitCd = .4; r.vx = Math.sign(r.x - truck.x) * 220; r.vy = 60; sCrash();
+      if (Math.random() < .5) setTip('快撞開貼著運鈔車的搶匪！');
+    }
+    // 警車撞搶匪
+    if ((r.state === 'chase' || r.state === 'flee') && Math.abs(r.x - cop.x) < (r.bike ? 26 : 34) && Math.abs(r.y - cop.y) < 54) {
+      r.state = 'spin'; r.ft = .9; r.vx = Math.sign(r.x - cop.x || 1) * 420; r.vy = (r.y - cop.y) * 3; sCrash(); vib(40); shake = .4;
+      const gain = r.bike ? 80 : 100; score += gain; lv.knock++; fx.push({ x: r.x, y: r.y - 30, t: .9, s: `撞開！+${gain}`, col: '#fbbf24' });
+      for (let i = 0; i < 8; i++) fx.push({ spark: 1, x: (r.x + cop.x) / 2, y: (r.y + cop.y) / 2, vx: (Math.random() - .5) * 300, vy: (Math.random() - .5) * 300, t: .4 });
+    }
+  }
+  robbers = robbers.filter(r => r.state !== 'out' && r.y < H + 120 && r.y > -140);
+  // 直升機
+  if (heli) {
+    heli.t += dt; heli.x += 420 * dt; const tg = heli.target;
+    if (tg && Math.abs(heli.x - tg.x) < 20 && tg.state !== 'out') { tg.state = 'spin'; tg.ft = .8; tg.vx = 300; score += 100; lv.knock++; fx.push({ x: tg.x, y: tg.y - 30, t: .9, s: '直升機攔截！+100', col: '#60a5fa' }); heli.target = null; }
+    if (heli.x > W + 80) heli = null;
+  }
+  updateTools();
+  if (esc.dist >= esc.total) { lv.escortScore = score - lv.startScore; state = 'intro'; t = 0; robbers = []; obstacles = []; setTip('抵達銀行！小心埋伏…'); hud(); }
+}
+cv.addEventListener('pointerdown', e => {
+  initAudio();
+  if (state === 'escort') { try { cv.setPointerCapture(e.pointerId); } catch (er) {} drag = e.pointerId; moveCop(e); }
+  else if (state === 'snipe' || state === 'walk') aimDown(e);
+});
+cv.addEventListener('pointermove', e => { if (state === 'escort' && drag === e.pointerId) moveCop(e); else aimMove(e); });
+cv.addEventListener('pointerup', e => { if (drag === e.pointerId) drag = null; aimUp(e); });
+cv.addEventListener('pointercancel', e => { drag = null; if (e.pointerId === aimId) { aimId = null; aim = null; } });
+const toLocal = e => { const r = cv.getBoundingClientRect(); return { x: (e.clientX - r.left) / r.width * W, y: (e.clientY - r.top) / r.height * H }; };
+function moveCop(e) { const q = toLocal(e); cop.tx = Math.max(ROAD.l + 16, Math.min(ROAD.r - 16, q.x)); cop.ty = Math.max(220, Math.min(H - 50, q.y - 40)); }
+
+function drawCar(x, y, w, h, body, ang = 0, opts = {}) {
+  ctx.save(); ctx.translate(x, y); ctx.rotate(ang);
+  ctx.fillStyle = 'rgba(0,0,0,.35)'; ctx.beginPath(); ctx.roundRect(-w / 2 + 3, -h / 2 + 5, w, h, 8); ctx.fill();
+  ctx.fillStyle = body; ctx.beginPath(); ctx.roundRect(-w / 2, -h / 2, w, h, 8); ctx.fill();
+  ctx.fillStyle = '#93c5fd'; ctx.beginPath(); ctx.roundRect(-w / 2 + 4, -h / 2 + h * .18, w - 8, h * .2, 4); ctx.fill();
+  ctx.fillStyle = '#1e293b'; ctx.beginPath(); ctx.roundRect(-w / 2 + 4, h / 2 - h * .26, w - 8, h * .14, 3); ctx.fill();
+  if (opts.police) {
+    ctx.fillStyle = '#fff'; ctx.fillRect(-w / 2, -h * .04, w, h * .16);
+    const on = Math.floor(t * 8) % 2; ctx.fillStyle = on ? '#ef4444' : '#3b82f6'; ctx.fillRect(-w / 2 + 4, -h * .1, w / 2 - 4, 5); ctx.fillStyle = on ? '#3b82f6' : '#ef4444'; ctx.fillRect(0, -h * .1, w / 2 - 4, 5);
+  }
+  if (opts.truck) { ctx.fillStyle = '#e2e8f0'; ctx.fillRect(-w / 2 + 3, -h * .05, w - 6, h * .5); ctx.fillStyle = '#16a34a'; ctx.fillRect(-w / 2 + 3, h * .12, w - 6, 6); ctx.fillStyle = '#065f46'; ctx.font = '900 11px system-ui'; ctx.textAlign = 'center'; ctx.fillText('運鈔', 0, h * .05); }
+  if (opts.mask) { ctx.fillStyle = '#ef4444'; ctx.fillRect(-w / 2, -h / 2 + 2, w, 4); }
+  ctx.restore();
+}
+function drawBike(x, y, ang, col) {
+  ctx.save(); ctx.translate(x, y); ctx.rotate(ang);
+  ctx.fillStyle = 'rgba(0,0,0,.3)'; ctx.fillRect(-6, -18, 14, 40);
+  ctx.fillStyle = '#111'; ctx.fillRect(-4, -22, 8, 12); ctx.fillRect(-4, 12, 8, 12);
+  ctx.fillStyle = col; ctx.beginPath(); ctx.roundRect(-8, -12, 16, 26, 6); ctx.fill();
+  ctx.fillStyle = '#ef4444'; ctx.beginPath(); ctx.arc(0, -2, 7, 0, 7); ctx.fill(); ctx.fillStyle = '#111'; ctx.fillRect(-5, -4, 10, 3);
+  ctx.restore();
+}
+function drawEscort() {
+  // 路邊建築
+  ctx.fillStyle = '#334155'; ctx.fillRect(0, 0, W, H);
+  for (let i = -1; i < 12; i++) { const y = ((i * 70 + esc.roadOff * 1.0) % (H + 140)) - 70; for (const [x, w] of [[0, 70], [330, 70]]) { ctx.fillStyle = (i + x) % 3 ? '#475569' : '#3f4b5f'; ctx.fillRect(x, y, w, 62); ctx.fillStyle = '#fde68a33'; ctx.fillRect(x + 10, y + 12, 14, 10); ctx.fillRect(x + 40, y + 30, 14, 10); } }
+  ctx.fillStyle = '#9ca3af'; ctx.fillRect(ROAD.l - 22, 0, 22, H); ctx.fillRect(ROAD.r, 0, 22, H);
+  ctx.fillStyle = '#1f2937'; ctx.fillRect(ROAD.l, 0, ROAD.r - ROAD.l, H);
+  ctx.fillStyle = '#e5e7eb'; for (const x of [165, 235]) for (let y = -60 + esc.roadOff; y < H; y += 60) ctx.fillRect(x - 2, y, 4, 30);
+  ctx.fillStyle = '#fbbf24'; ctx.fillRect(ROAD.l + 2, 0, 3, H); ctx.fillRect(ROAD.r - 5, 0, 3, H);
+  // 路障
+  for (const o of obstacles) {
+    if (o.kind === 'cone') { ctx.fillStyle = '#f97316'; ctx.beginPath(); ctx.moveTo(o.x, o.y - 14); ctx.lineTo(o.x + 10, o.y + 10); ctx.lineTo(o.x - 10, o.y + 10); ctx.fill(); ctx.fillStyle = '#fff'; ctx.fillRect(o.x - 6, o.y - 2, 12, 3); ctx.fillStyle = '#f97316'; ctx.fillRect(o.x - 26, o.y + 8, 52, 5); }
+    else { ctx.fillStyle = '#64748b'; ctx.fillRect(o.x - 28, o.y - 4, 56, 8); ctx.fillStyle = '#e2e8f0'; for (let k = -24; k <= 24; k += 8) { ctx.beginPath(); ctx.moveTo(o.x + k, o.y - 4); ctx.lineTo(o.x + k + 3, o.y - 11); ctx.lineTo(o.x + k + 6, o.y - 4); ctx.fill(); } }
+  }
+  drawCar(truck.x, truck.y, 46, 92, '#15803d', (LANES[truck.lane] - truck.x) * .004, { truck: true });
+  for (const r of robbers) r.bike ? drawBike(r.x, r.y, r.spin + Math.atan2(r.vx, -r.vy) * .3, r.col) : drawCar(r.x, r.y, 36, 64, r.col, r.spin + Math.max(-.5, Math.min(.5, r.vx * .002)), { mask: true });
+  drawCar(cop.x, cop.y, 38, 70, '#111827', cop.ang, { police: true });
+  if (sirenFx > 0) { ctx.strokeStyle = `rgba(${Math.floor(t * 8) % 2 ? '239,68,68' : '59,130,246'},${sirenFx * .5})`; ctx.lineWidth = 4; ctx.beginPath(); ctx.arc(cop.x, cop.y, 170 * (1.3 - sirenFx * .25), 0, 7); ctx.stroke(); }
+  if (heli) { ctx.fillStyle = 'rgba(0,0,0,.25)'; ctx.beginPath(); ctx.ellipse(heli.x, heli.y + 90, 40, 14, 0, 0, 7); ctx.fill(); ctx.fillStyle = '#1e3a8a'; ctx.beginPath(); ctx.ellipse(heli.x, heli.y, 26, 14, 0, 0, 7); ctx.fill(); ctx.fillRect(heli.x - 50, heli.y - 3, 28, 6); ctx.strokeStyle = '#cbd5e1'; ctx.lineWidth = 3; const a = t * 40; ctx.beginPath(); ctx.moveTo(heli.x + Math.cos(a) * 44, heli.y + Math.sin(a) * 10); ctx.lineTo(heli.x - Math.cos(a) * 44, heli.y - Math.sin(a) * 10); ctx.stroke(); }
+  // 進度
+  const p = Math.min(1, esc.dist / esc.total);
+  ctx.fillStyle = '#0008'; ctx.fillRect(10, 10, 14, H - 40); ctx.fillStyle = '#22c55e'; ctx.fillRect(12, 12 + (H - 44) * (1 - p), 10, (H - 44) * p);
+  ctx.font = '16px system-ui'; ctx.textAlign = 'center'; ctx.fillText('🏦', 17, 26); ctx.fillText('🚚', 17, 12 + (H - 44) * (1 - p) + 6);
+}
+
+/* =================== 第二段：銀行門口狙擊 =================== */
+const SR = 105, ZOOM = 2.4, MAG = 5;
+const COVERS = [
+  { id: 'colL', x: 112, y: 470, w: 30, h: 150, kind: 'col' },
+  { id: 'colR', x: 288, y: 470, w: 30, h: 150, kind: 'col' },
+  { id: 'car', x: 330, y: 560, w: 90, h: 46, kind: 'car' },
+  { id: 'bin', x: 46, y: 488, w: 30, h: 40, kind: 'bin' },
+];
+const SPOTS = [  // 埋伏位置：躲在掩體後、探頭方向
+  { x: 112, y: 470, cover: 'colL', dx: -26 }, { x: 112, y: 470, cover: 'colL', dx: 26 },
+  { x: 288, y: 470, cover: 'colR', dx: 26 }, { x: 288, y: 470, cover: 'colR', dx: -26 },
+  { x: 330, y: 562, cover: 'car', dy: 1 }, { x: 46, y: 490, cover: 'bin', dy: 1 },
+  { x: 80, y: 250, win: true }, { x: 160, y: 250, win: true }, { x: 240, y: 250, win: true }, { x: 320, y: 250, win: true },
+];
+let enemies = [], guards = [], civs = [], aim = null, aimId = null, ammo = MAG, reload = 0, recoil = 0, sn = null, holes = [];
+function startSnipe() {
+  state = 'snipe'; t = 0; fx = []; holes = []; ammo = MAG; reload = 0; aim = null;
+  const extra = hp < 50 ? 2 : hp < 80 ? 1 : 0;
+  const n = Math.min(SPOTS.length, 2 + level + extra);
+  const spots = SPOTS.slice().sort(() => Math.random() - .5);
+  const used = new Set(); enemies = [];
+  for (const sp of spots) {
+    if (enemies.length >= n) break;
+    const key = sp.cover || ('w' + sp.x); if (used.has(key)) continue; used.add(key);
+    enemies.push(mkEnemy(sp, enemies.length === 0 && level >= 3));
+  }
+  guards = [{ x: 150, y: 560, off: 0 }, { x: 128, y: 566, off: 1 }]; civs = [];
+  sn = { walkT: 0, runT: 3, runLeft: 1 + level, civT: 4, shotCiv: 0, walking: false };
+  $('siren').hidden = true; $('heli').hidden = true; $('ammo').hidden = false; ammoUI();
+  setTip('按住開鏡瞄準，放開開槍！先清掉埋伏的搶匪'); hud();
+}
+function mkEnemy(sp, boss) {
+  return { sp, boss, x: sp.x, y: sp.y, state: 'hide', tm: .8 + Math.random() * 2, expose: 0, hp: boss ? 2 : 1, down: 0, shootCd: 0, runner: false, h: sp.win ? 70 : 92 };
+}
+function ammoUI() { $('ammo').innerHTML = reload > 0 ? '<b style="color:#fbbf24">換彈中…</b>' : Array.from({ length: MAG }, (_, i) => `<span class="${i >= ammo ? 'used' : ''}"></span>`).join(''); }
+function enemyPos(e) {   // 目前顯示位置（探頭程度）
+  if (e.runner) return { x: e.x, y: e.y };
+  const k = e.expose, sp = e.sp;
+  if (sp.win) return { x: sp.x, y: sp.y + (1 - k) * 60 };
+  if (sp.dy) return { x: sp.x, y: sp.y + (1 - k) * 52 };
+  return { x: sp.x + sp.dx * k, y: sp.y };
+}
+function geomPerson(x, y, h) { return { head: { x, y: y - h * .86, r: h * .1 }, body: { x0: x - h * .17, x1: x + h * .17, y0: y - h * .76, y1: y - h * .05 } }; }
+function updateSnipe(dt) {
+  recoil = Math.max(0, recoil - dt * 6);
+  if (reload > 0) { reload -= dt; if (reload <= 0) { reload = 0; ammo = MAG; } ammoUI(); }
+  if (aim) { aim.sx = Math.sin(t * 1.6) * 5 + Math.sin(t * 2.9) * 2.5; aim.sy = Math.cos(t * 1.2) * 4 + Math.sin(t * 2.2) * 2; }
+  for (const e of enemies) {
+    if (e.down) { e.down += dt; continue; }
+    e.shootCd = Math.max(0, e.shootCd - dt);
+    if (e.runner) {
+      const g = guards[0], dx = g.x - e.x, dy = g.y - e.y, d = Math.hypot(dx, dy);
+      const sp = 38 + level * 6; e.x += dx / d * sp * dt; e.y += dy / d * sp * dt; e.ph = (e.ph || 0) + dt * 10;
+      if (d < 22) { fail('搶匪搶走錢箱了！'); return; }
+      continue;
+    }
+    e.tm -= dt;
+    if (e.state === 'hide') { e.expose = Math.max(0, e.expose - dt * 4); if (e.tm <= 0) { e.state = 'peek'; e.tm = (1.6 + Math.random() * 1.4) * (1 - level * .08); } }
+    else { e.expose = Math.min(1, e.expose + dt * 4);
+      if (e.expose >= 1 && e.shootCd <= 0 && Math.random() < dt * .5 && !sn.walking) { e.shootCd = 2.5; damage(3 + level, 90, 560); fx.push({ flash: 1, x: enemyPos(e).x, y: enemyPos(e).y - e.h * .6, t: .15 }); noise(.15, .2, 2000); }
+      if (e.tm <= 0) { e.state = 'hide'; e.tm = 1 + Math.random() * 2; } }
+  }
+  enemies = enemies.filter(e => e.down < 1.2);
+  // 路人
+  sn.civT -= dt;
+  if (sn.civT <= 0) { const fromL = Math.random() < .5; civs.push({ x: fromL ? -20 : W + 20, y: 505 + Math.random() * 8, v: (fromL ? 1 : -1) * (35 + Math.random() * 20), ph: 0, col: ['#f472b6', '#facc15', '#34d399', '#fb923c'][(Math.random() * 4) | 0] }); sn.civT = 5 + Math.random() * 5; }
+  civs.forEach(c => { c.x += c.v * dt; c.ph += dt * 8; }); civs = civs.filter(c => c.x > -40 && c.x < W + 40 && !c.down);
+  // 埋伏清空 → 運鈔員出發
+  if (state === 'snipe' && enemies.filter(e => !e.down).length === 0) { state = 'walk'; sn.walking = true; setTip('埋伏清空！運鈔員出發，擋下衝出來的搶匪'); hud(); }
+  if (state === 'walk') {
+    sn.walkT += dt;
+    const k = Math.min(1, sn.walkT / 13);
+    guards.forEach((g, i) => { const sx = 150 - i * 22, sy = 560 + i * 6; g.x = sx + (200 - sx) * k; g.y = sy + (468 - sy) * k; g.ph = (g.ph || 0) + dt * 8; });
+    sn.runT -= dt;
+    if (sn.runT <= 0 && sn.runLeft > 0) {
+      sn.runLeft--; sn.runT = Math.max(1.8, 4 - level * .4);
+      const r = Math.random();
+      const from = r < .45 ? { x: W + 20, y: 520 } : r < .75 ? { x: 290, y: 470 } : { x: -20, y: 530 };
+      enemies.push({ runner: true, x: from.x, y: from.y, hp: level >= 4 && Math.random() < .3 ? 2 : 1, boss: false, down: 0, h: 92, ph: 0 });
+    }
+    if (k >= 1 && enemies.filter(e => !e.down).length === 0) win();
+  }
+}
+/* 瞄準 */
+function aimDown(e) { if (aimId !== null) return; try { cv.setPointerCapture(e.pointerId); } catch (er) {} aimId = e.pointerId; const q = toLocal(e); aim = { fx: q.x, fy: q.y, x: q.x, y: Math.max(20, q.y - 115), sx: 0, sy: 0 }; }
+function aimMove(e) { if (e.pointerId !== aimId || !aim) return; const q = toLocal(e); aim.fx = q.x; aim.fy = q.y; aim.x = q.x; aim.y = Math.max(20, q.y - 115); }
+function aimUp(e) { if (e.pointerId !== aimId) return; aimId = null; if (aim && (state === 'snipe' || state === 'walk')) fire(); aim = null; }
+function fire() {
+  if (reload > 0) { sClick(); return; }
+  ammo--; lv.shots++; sShot(); vib(35); recoil = 1; shake = .4;
+  const ax = aim.x + aim.sx, ay = aim.y + aim.sy;
+  // 先檢查誤射：運鈔員、路人
+  for (const g of (state === 'walk' || state === 'snipe' ? guards : [])) { const G = geomPerson(g.x, g.y, 84); if (hitP(G, ax, ay)) { civHit(g.x, g.y - 90, '誤射運鈔員！'); return after(); } }
+  for (const c of civs) { const G = geomPerson(c.x, c.y, 84); if (hitP(G, ax, ay)) { c.down = 1; civHit(c.x, c.y - 90, '誤射路人！'); return after(); } }
+  // 搶匪（掩體擋住的部分打不到）
+  let hit = null, head = false;
+  for (const e of enemies) {
+    if (e.down) continue; const p = enemyPos(e); if (!e.runner && e.expose < .35) continue;
+    const G = geomPerson(p.x, p.y, e.h);
+    if (Math.hypot(ax - G.head.x, ay - G.head.y) < G.head.r * 1.2) { hit = e; head = true; break; }
+    if (ax > G.body.x0 && ax < G.body.x1 && ay > G.body.y0 && ay < G.body.y1 && !behindCover(e, ax, ay)) { hit = e; break; }
+  }
+  if (hit) {
+    lv.hits++;
+    if (hit.boss && !head) { sClang(); fx.push({ x: ax, y: ay - 14, t: .8, s: '防彈背心！打頭', col: '#94a3b8' }); for (let i = 0; i < 6; i++) fx.push({ spark: 1, x: ax, y: ay, vx: (Math.random() - .5) * 200, vy: (Math.random() - .5) * 200, t: .3 }); return after(); }
+    hit.hp -= head ? 2 : 1;
+    if (hit.hp <= 0) {
+      hit.down = .001; sDown(); lv.kills++; if (head) lv.heads++;
+      const gain = (hit.boss ? 300 : hit.runner ? 180 : 150) + (head ? 50 : 0); score += gain;
+      fx.push({ x: ax, y: ay - 20, t: 1, s: (head ? '爆頭！' : '擊倒！') + ` +${gain}`, col: head ? '#fbbf24' : '#fff' });
+    } else fx.push({ x: ax, y: ay - 20, t: .7, s: '再一槍！', col: '#fb923c' });
+  } else {
+    holes.push({ x: ax, y: ay, t: 8 });
+    for (let i = 0; i < 5; i++) fx.push({ dust: 1, x: ax, y: ay, vx: (Math.random() - .5) * 80, vy: -Math.random() * 80, t: .5 });
+  }
+  after();
+  function after() { if (ammo <= 0) { reload = 1.6; sReload(); } ammoUI(); hud(); }
+}
+function hitP(G, x, y) { return Math.hypot(x - G.head.x, y - G.head.y) < G.head.r * 1.1 || (x > G.body.x0 && x < G.body.x1 && y > G.body.y0 && y < G.body.y1); }
+function behindCover(e, x, y) {
+  if (e.runner || e.sp.win) return false;
+  const c = COVERS.find(c => c.id === e.sp.cover); if (!c) return false;
+  return x > c.x - c.w / 2 && x < c.x + c.w / 2 && y > c.y - c.h && y < c.y;
+}
+function civHit(x, y, msg) {
+  sn.shotCiv++; lv.civ++; score = Math.max(0, score - 300); sFail(); vib([60, 40, 60]);
+  fx.push({ x, y, t: 1.4, s: `${msg} -300`, col: '#ef4444' }); setTip('⚠ 小心！再誤射一次就失敗');
+  if (sn.shotCiv >= 2) fail('誤射太多次，任務失敗');
+}
+
+/* 畫人 */
+function drawPerson(x, y, h, o) {
+  ctx.save();
+  const d = o.down ? Math.min(1, o.down / .5) : 0;
+  ctx.globalAlpha = o.down ? Math.max(0, 1 - (o.down - .7) / .5) : 1;
+  ctx.translate(x, y); ctx.rotate(d * 1.3 * (o.dir || 1)); ctx.translate(-x, -y);
+  const step = Math.sin(o.ph || 0) * h * .06;
+  ctx.strokeStyle = o.pants; ctx.lineWidth = h * .09; ctx.lineCap = 'round';
+  ctx.beginPath(); ctx.moveTo(x - h * .06, y - h * .42); ctx.lineTo(x - h * .06 + step, y); ctx.moveTo(x + h * .06, y - h * .42); ctx.lineTo(x + h * .06 - step, y); ctx.stroke();
+  ctx.fillStyle = o.shirt; ctx.beginPath(); ctx.roundRect(x - h * .17, y - h * .77, h * .34, h * .38, h * .08); ctx.fill();
+  if (o.stripe) { ctx.fillStyle = 'rgba(255,255,255,.25)'; for (let i = 0; i < 3; i++) ctx.fillRect(x - h * .17, y - h * .72 + i * h * .11, h * .34, h * .04); }
+  if (o.vest) { ctx.fillStyle = '#4b5563'; ctx.fillRect(x - h * .15, y - h * .74, h * .3, h * .3); ctx.fillStyle = '#fbbf24'; ctx.font = `700 ${h * .08}px system-ui`; ctx.textAlign = 'center'; ctx.fillText('BOSS', x, y - h * .55); }
+  ctx.fillStyle = o.skin || '#f1c27d'; ctx.beginPath(); ctx.arc(x, y - h * .86, h * .1, 0, 7); ctx.fill();
+  if (o.mask) { ctx.fillStyle = '#111827'; ctx.beginPath(); ctx.arc(x, y - h * .87, h * .105, Math.PI * .95, Math.PI * 2.05); ctx.fill(); ctx.fillRect(x - h * .1, y - h * .87, h * .2, h * .06); ctx.fillStyle = o.down ? '#fff' : '#fde68a'; ctx.fillRect(x - h * .07, y - h * .89, h * .14, h * .035); }
+  if (o.helmet) { ctx.fillStyle = '#1e40af'; ctx.beginPath(); ctx.arc(x, y - h * .9, h * .11, Math.PI, 0); ctx.fill(); }
+  if (o.box) { ctx.fillStyle = '#cbd5e1'; ctx.fillRect(x + h * .1, y - h * .55, h * .26, h * .2); ctx.fillStyle = '#64748b'; ctx.fillRect(x + h * .2, y - h * .6, h * .06, h * .05); }
+  if (o.gun) { ctx.fillStyle = '#111'; ctx.fillRect(x + (o.gun > 0 ? h * .12 : -h * .4), y - h * .62, h * .28, h * .05); }
+  if (o.down && o.down > .3) { ctx.font = `${h * .14}px system-ui`; ctx.textAlign = 'center'; ctx.fillText('💫', x, y - h * 1.05); }
+  ctx.restore();
+}
+function drawBank() {
+  const sky = ctx.createLinearGradient(0, 0, 0, 120); sky.addColorStop(0, '#60a5fa'); sky.addColorStop(1, '#bfdbfe'); ctx.fillStyle = sky; ctx.fillRect(0, 0, W, 130);
+  // 建築
+  ctx.fillStyle = '#e7e5e4'; ctx.fillRect(0, 70, W, 410);
+  ctx.fillStyle = '#d6d3d1'; ctx.fillRect(0, 70, W, 26);
+  ctx.fillStyle = '#92400e'; ctx.fillRect(110, 112, 180, 34); ctx.fillStyle = '#fde68a'; ctx.font = '900 20px "PingFang TC","Noto Sans TC",system-ui'; ctx.textAlign = 'center'; ctx.fillText('幸 福 銀 行', 200, 136);
+  // 二樓窗
+  for (const x of [80, 160, 240, 320]) { ctx.fillStyle = '#1e293b'; ctx.fillRect(x - 26, 175, 52, 78); ctx.fillStyle = '#334155'; ctx.fillRect(x - 22, 179, 44, 70); }
+  ctx.fillStyle = '#a8a29e'; ctx.fillRect(0, 300, W, 14);
+  // 大門
+  ctx.fillStyle = '#78350f'; ctx.fillRect(152, 340, 96, 132); ctx.fillStyle = '#bae6fd'; ctx.fillRect(158, 348, 40, 118); ctx.fillRect(202, 348, 40, 118);
+  ctx.fillStyle = '#fbbf24'; ctx.fillRect(196, 400, 3, 14); ctx.fillRect(202, 400, 3, 14);
+  // 地面
+  ctx.fillStyle = '#d1d5db'; ctx.fillRect(0, 470, W, 60); ctx.fillStyle = '#9ca3af'; for (let x = 0; x < W; x += 40) ctx.fillRect(x, 470, 1, 60);
+  ctx.fillStyle = '#374151'; ctx.fillRect(0, 530, W, H - 530); ctx.fillStyle = '#facc15'; for (let x = 0; x < W; x += 50) ctx.fillRect(x, 596, 26, 4);
+  // 運鈔車（側面停在左邊）
+  ctx.fillStyle = '#15803d'; ctx.beginPath(); ctx.roundRect(-30, 520, 170, 70, 8); ctx.fill();
+  ctx.fillStyle = '#e2e8f0'; ctx.fillRect(-30, 545, 170, 20); ctx.fillStyle = '#065f46'; ctx.font = '900 13px system-ui'; ctx.fillText('運鈔車', 60, 560);
+  ctx.fillStyle = '#111'; ctx.beginPath(); ctx.arc(10, 592, 14, 0, 7); ctx.arc(110, 592, 14, 0, 7); ctx.fill();
+}
+function drawCovers() {
+  for (const c of COVERS) {
+    if (c.kind === 'col') { const g = ctx.createLinearGradient(c.x - c.w / 2, 0, c.x + c.w / 2, 0); g.addColorStop(0, '#a8a29e'); g.addColorStop(.5, '#f5f5f4'); g.addColorStop(1, '#a8a29e'); ctx.fillStyle = g; ctx.fillRect(c.x - c.w / 2, c.y - c.h - 160, c.w, c.h + 160); ctx.fillStyle = '#d6d3d1'; ctx.fillRect(c.x - c.w / 2 - 6, c.y - 10, c.w + 12, 10); }
+    if (c.kind === 'car') { ctx.fillStyle = '#b91c1c'; ctx.beginPath(); ctx.roundRect(c.x - c.w / 2, c.y - c.h, c.w, c.h - 8, 10); ctx.fill(); ctx.fillStyle = '#93c5fd'; ctx.fillRect(c.x - c.w / 2 + 16, c.y - c.h - 14, c.w - 32, 18); ctx.fillStyle = '#b91c1c'; ctx.fillRect(c.x - c.w / 2 + 12, c.y - c.h - 16, c.w - 24, 4); ctx.fillStyle = '#111'; ctx.beginPath(); ctx.arc(c.x - 26, c.y - 6, 10, 0, 7); ctx.arc(c.x + 26, c.y - 6, 10, 0, 7); ctx.fill(); }
+    if (c.kind === 'bin') { ctx.fillStyle = '#15803d'; ctx.fillRect(c.x - c.w / 2, c.y - c.h, c.w, c.h); ctx.fillStyle = '#166534'; ctx.fillRect(c.x - c.w / 2 - 3, c.y - c.h - 5, c.w + 6, 7); }
+  }
+}
+function drawSnipeScene() {
+  drawBank();
+  for (const h of holes) { ctx.fillStyle = `rgba(30,30,30,${Math.min(.8, h.t)})`; ctx.beginPath(); ctx.arc(h.x, h.y, 2, 0, 7); ctx.fill(); }
+  // 窗戶裡的搶匪先畫（被窗框裁切）
+  for (const e of enemies) if (!e.runner && e.sp.win) { const p = enemyPos(e); ctx.save(); ctx.beginPath(); ctx.rect(e.sp.x - 22, 179, 44, 70); ctx.clip(); drawPerson(p.x, p.y, e.h, { shirt: '#1f2937', pants: '#111', mask: true, gun: 1, down: e.down, stripe: true }); ctx.restore(); }
+  // 掩體後的搶匪
+  for (const e of enemies) if (!e.runner && !e.sp.win) { const p = enemyPos(e); drawPerson(p.x, p.y, e.h, { shirt: e.boss ? '#374151' : '#1f2937', pants: '#111', mask: true, vest: e.boss, gun: e.sp.dx ? Math.sign(e.sp.dx) : 1, down: e.down, stripe: !e.boss, dir: e.sp.dx ? Math.sign(e.sp.dx) : 1 }); }
+  drawCovers();
+  for (const c of civs) drawPerson(c.x, c.y, 84, { shirt: c.col, pants: '#1e3a8a', ph: c.ph, down: c.down });
+  for (const g of guards) drawPerson(g.x, g.y, 86, { shirt: '#1d4ed8', pants: '#1e293b', helmet: true, box: true, ph: state === 'walk' ? g.ph : 0 });
+  for (const e of enemies) if (e.runner) drawPerson(e.x, e.y, e.h, { shirt: '#111827', pants: '#111', mask: true, gun: 1, ph: e.ph, down: e.down, stripe: true, dir: -1 });
+  for (const f of fx) { if (f.flash) { ctx.fillStyle = `rgba(255,220,120,${f.t * 6})`; ctx.beginPath(); ctx.arc(f.x + 14, f.y, 8, 0, 7); ctx.fill(); } if (f.dust) { ctx.fillStyle = `rgba(200,190,170,${f.t * 1.6})`; ctx.beginPath(); ctx.arc(f.x, f.y, 3, 0, 7); ctx.fill(); } }
+}
+function drawSnipe() {
+  drawSnipeScene();
+  if (state === 'walk') { ctx.strokeStyle = 'rgba(34,197,94,.7)'; ctx.setLineDash([6, 6]); ctx.lineWidth = 3; ctx.beginPath(); ctx.moveTo(150, 560); ctx.lineTo(200, 468); ctx.stroke(); ctx.setLineDash([]); }
+  if (aim) {
+    const cx = aim.x, cy = aim.y - recoil * 24;
+    ctx.fillStyle = 'rgba(0,0,0,.55)'; ctx.fillRect(0, 0, W, H);
+    ctx.save(); ctx.beginPath(); ctx.arc(cx, cy, SR, 0, 7); ctx.clip();
+    ctx.translate(cx, cy); ctx.scale(ZOOM, ZOOM); ctx.translate(-(aim.x + aim.sx), -(aim.y + aim.sy)); drawSnipeScene(); ctx.restore();
+    ctx.save(); ctx.beginPath(); ctx.arc(cx, cy, SR, 0, 7); ctx.clip();
+    const vg = ctx.createRadialGradient(cx, cy, SR * .6, cx, cy, SR); vg.addColorStop(0, 'rgba(0,0,0,0)'); vg.addColorStop(1, 'rgba(0,0,0,.6)'); ctx.fillStyle = vg; ctx.fillRect(cx - SR, cy - SR, SR * 2, SR * 2);
+    ctx.strokeStyle = '#111'; ctx.lineWidth = 1.5; ctx.beginPath(); ctx.moveTo(cx - SR, cy); ctx.lineTo(cx - 8, cy); ctx.moveTo(cx + 8, cy); ctx.lineTo(cx + SR, cy); ctx.moveTo(cx, cy - SR); ctx.lineTo(cx, cy - 8); ctx.moveTo(cx, cy + 8); ctx.lineTo(cx, cy + SR); ctx.stroke();
+    ctx.fillStyle = reload > 0 ? '#999' : '#ef4444'; ctx.beginPath(); ctx.arc(cx, cy, 1.8, 0, 7); ctx.fill(); ctx.restore();
+    ctx.strokeStyle = '#111'; ctx.lineWidth = 8; ctx.beginPath(); ctx.arc(cx, cy, SR + 3, 0, 7); ctx.stroke();
+    if (reload > 0) { ctx.fillStyle = '#fbbf24'; ctx.font = '700 13px system-ui'; ctx.textAlign = 'center'; ctx.fillText('換彈中…', cx, cy + SR + 22); }
+    ctx.fillStyle = 'rgba(255,255,255,.25)'; ctx.beginPath(); ctx.arc(aim.fx, aim.fy, 16, 0, 7); ctx.fill();
+  }
+  if (recoil > .7) { ctx.fillStyle = `rgba(255,220,120,${(recoil - .7) * 2})`; ctx.fillRect(0, 0, W, H); }
+  const left = enemies.filter(e => !e.down).length;
+  ctx.fillStyle = '#000a'; ctx.fillRect(W - 128, 8, 120, 26); ctx.fillStyle = '#fff'; ctx.font = '700 12px system-ui'; ctx.textAlign = 'center';
+  ctx.fillText(state === 'walk' ? `運鈔員前進中 ${Math.round(Math.min(1, sn.walkT / 13) * 100)}%` : `埋伏搶匪剩 ${left} 人`, W - 68, 26);
+  if (state === 'snipe' && t < 4 && !aim) { ctx.fillStyle = '#000a'; ctx.fillRect(40, 260, 320, 30); ctx.fillStyle = '#fbbf24'; ctx.font = '700 14px system-ui'; ctx.fillText('按住畫面開鏡 → 拖動瞄準 → 放開開槍', 200, 280); }
+}
+
+/* =================== 過場、勝負 =================== */
+function drawIntro() {
+  // 運鈔車開到銀行
+  drawBank(); drawCovers();
+  ctx.fillStyle = `rgba(0,0,0,${Math.max(0, (t - 2) / 1.2) * .8})`; ctx.fillRect(0, 0, W, H);
+  ctx.fillStyle = '#000b'; ctx.fillRect(0, 222, W, 72);
+  ctx.fillStyle = '#fff'; ctx.font = '900 26px system-ui'; ctx.textAlign = 'center';
+  ctx.fillText(t < 2 ? '🚚 抵達幸福銀行' : '📡 狙擊手就位', 200, 250);
+  ctx.font = '600 14px system-ui'; ctx.fillText(t < 2 ? '門口好像有人埋伏…' : '從對面頂樓掩護運鈔員！', 200, 280);
+}
+function win() {
+  state = 'result'; sWin();
+  const acc = lv.shots ? lv.hits / lv.shots : 0, bonus = Math.round(hp * 5 + acc * 300);
+  score += bonus;
+  const stars = 1 + (hp >= 50 ? 1 : 0) + (hp >= 75 && lv.civ === 0 ? 1 : 0);
+  saveBest();
+  showResult(level >= LEVELS ? '🏆 全部關卡完成！' : `第 ${level} 關完成！`, stars, [
+    ['護送撞開', `${lv.knock} 台`], ['撞掉路障', `${lv.obst} 個`], ['擊倒搶匪', `${lv.kills} 人`], ['命中率', `${Math.round(acc * 100)}%`],
+    ['運鈔車耐久', `${Math.round(hp)}%`], ['過關獎勵', `+${bonus}`]], level >= LEVELS ? '再玩一次' : '下一關', level >= LEVELS ? 'restart' : 'next');
+}
+function fail(msg) {
+  if (state === 'result' || state === 'menu') return;
+  state = 'result'; aim = null; aimId = null; sFail(); saveBest();
+  showResult('任務失敗', 0, [['原因', msg], ['到達關卡', `第 ${level} 關`], ['總分', score], ['最高紀錄', `第 ${best.level} 關・${best.score} 分`]], '重新挑戰這關', 'retry');
+}
+function saveBest() { if (level > best.level || (level === best.level && score > best.score)) { best = { level, score }; } if (score > best.score) best.score = score; try { localStorage.setItem('cashTruckBest', JSON.stringify(best)); } catch (e) {} }
+let nextAction = 'next';
+function showResult(title, stars, rows, btn, action) {
+  $('rTitle').textContent = title; $('rStars').textContent = stars ? '★'.repeat(stars) + '☆'.repeat(3 - stars) : '💥';
+  $('rStats').innerHTML = rows.map(([a, b]) => `<div>${a}<b style="${String(b).length > 8 ? 'font-size:13px' : ''}">${b}</b></div>`).join('');
+  $('rNext').textContent = btn; nextAction = action; $('result').hidden = false; hud();
+}
+function beginLevel() {
+  hp = 100; lv = { knock: 0, obst: 0, kills: 0, heads: 0, shots: 0, hits: 0, civ: 0, startScore: score, escortScore: 0 };
+  $('result').hidden = true; $('menu').hidden = true; startEscort();
+}
+$('start').onclick = () => { initAudio(); level = 1; score = 0; beginLevel(); };
+$('rNext').onclick = () => { initAudio(); if (nextAction === 'next') level++; else if (nextAction === 'restart') { level = 1; score = 0; } else score = lv.startScore; beginLevel(); };
+$('rMenu').onclick = () => { $('result').hidden = true; $('menu').hidden = false; state = 'menu'; menuBest(); hud(); };
+function menuBest() { $('bestTxt').textContent = best.level ? `最高紀錄：第 ${best.level} 關・${best.score} 分` : ''; }
+
+/* =================== 主迴圈 =================== */
+function update(dt) {
+  shake = Math.max(0, shake - dt * 3);
+  fx.forEach(f => { f.t -= dt; if (f.vx !== undefined) { f.x += f.vx * dt; f.y += f.vy * dt; } }); fx = fx.filter(f => f.t > 0);
+  holes.forEach(h => h.t -= dt); holes = holes.filter(h => h.t > 0);
+  if (state === 'escort') { t += dt; updateEscort(dt); }
+  else if (state === 'intro') { t += dt; $('siren').hidden = true; $('heli').hidden = true; if (t > 3.2) startSnipe(); }
+  else if (state === 'snipe' || state === 'walk') { t += dt; updateSnipe(dt); }
+}
+function draw() {
+  ctx.setTransform(scale, 0, 0, scale, 0, 0);
+  if (shake > 0) ctx.translate((Math.random() - .5) * shake * 10, (Math.random() - .5) * shake * 10);
+  if (state === 'escort' || (state === 'result' && truck && !sn)) drawEscort();
+  else if (state === 'intro') drawIntro();
+  else if (state === 'snipe' || state === 'walk' || (state === 'result' && sn)) drawSnipe();
+  else { drawBank(); ctx.fillStyle = '#0007'; ctx.fillRect(0, 0, W, H); }
+  for (const f of fx) {
+    if (f.spark) { ctx.fillStyle = `rgba(255,200,80,${f.t * 2.5})`; ctx.fillRect(f.x, f.y, 3, 3); }
+    else if (f.s) { ctx.globalAlpha = Math.min(1, f.t * 2); ctx.font = '900 16px system-ui'; ctx.textAlign = 'center'; ctx.lineWidth = 4; ctx.strokeStyle = '#000'; ctx.strokeText(f.s, f.x, f.y - (1 - f.t) * 18); ctx.fillStyle = f.col; ctx.fillText(f.s, f.x, f.y - (1 - f.t) * 18); ctx.globalAlpha = 1; }
+  }
+}
+// 進入護送時清掉上一段的狙擊資料，讓結算畫面背景正確
+const _startEscort = startEscort; startEscort = function () { sn = null; _startEscort(); };
+let last = performance.now();
+function loop(now) { const dt = Math.min(.033, (now - last) / 1000); last = now; update(dt); draw(); requestAnimationFrame(loop); }
+resize(); menuBest(); hud(); requestAnimationFrame(loop);
+window.__ct = { get state() { return state; }, get hp() { return hp; }, get score() { return score; }, get level() { return level; }, get enemies() { return enemies; }, get robbers() { return robbers; }, get cop() { return cop; }, get truck() { return truck; }, get esc() { return esc; }, get sn() { return sn; }, enemyPos, geomPerson, get guards() { return guards; }, get civs() { return civs; } };
+})();
+</script>
+</body>
+</html>

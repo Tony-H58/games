@@ -1,0 +1,471 @@
+<!DOCTYPE html>
+<html lang="zh-Hant">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1,maximum-scale=1,user-scalable=no">
+<title>柏青哥</title>
+<style>
+  html,body{margin:0;height:100%;background:#0a0612;color:#f5ecff;font-family:system-ui,-apple-system,"PingFang TC","Noto Sans TC",sans-serif;overflow:hidden;touch-action:none;user-select:none;-webkit-user-select:none}
+  #app{max-width:520px;margin:0 auto;display:flex;flex-direction:column;height:100%}
+  #hud{display:flex;justify-content:space-between;padding:6px 12px 2px;font-size:11px;opacity:.95}
+  #hud b{display:block;font-size:19px;font-variant-numeric:tabular-nums;color:#ffd60a}
+  #hud .big b{font-size:24px;color:#fff;text-shadow:0 0 10px #ff4fd8}
+  #wrap{position:relative;flex:1;display:flex;justify-content:center;align-items:center;min-height:0}
+  canvas{display:block;touch-action:none}
+  #ctrl{display:flex;align-items:center;gap:14px;padding:6px 16px 14px}
+  #info{flex:1;font-size:12px;line-height:1.5;opacity:.85}
+  #bar{height:8px;background:#ffffff1a;border-radius:4px;margin-top:6px;overflow:hidden}
+  #bar i{display:block;height:100%;width:55%;background:linear-gradient(90deg,#3a86ff,#ff006e)}
+  #knob{width:92px;height:92px;border-radius:50%;flex:none;position:relative;
+        background:radial-gradient(circle at 35% 30%,#fff,#c9c9d6 35%,#6c6c80 80%);box-shadow:0 0 0 5px #2a2140,0 0 18px #ff4fd855;touch-action:none}
+  #knob.on{box-shadow:0 0 0 5px #ff4fd8,0 0 26px #ff4fd8}
+  #knob .pt{position:absolute;left:50%;top:50%;width:6px;height:38px;margin-left:-3px;margin-top:-38px;background:#ff006e;border-radius:3px;transform-origin:50% 100%}
+  #knob span{position:absolute;inset:0;display:flex;align-items:center;justify-content:center;font-size:12px;font-weight:800;color:#2a2140;pointer-events:none}
+  .ov{position:absolute;inset:0;display:flex;align-items:center;justify-content:center;background:#0008}
+  .box{background:#1b1030f0;border:2px solid #ff4fd8;border-radius:16px;padding:20px;width:min(300px,84%);text-align:center;box-shadow:0 0 30px #ff4fd855}
+  .box h2{margin:0 0 6px;font-size:30px;color:#ffd60a;text-shadow:0 0 12px #ff9f1c}
+  .box p{font-size:13px;opacity:.9;line-height:1.7;margin:6px 0 14px}
+  .go{width:100%;background:linear-gradient(90deg,#ff006e,#8338ec);color:#fff;border:0;border-radius:10px;padding:13px;font-size:17px;font-weight:800}
+  [hidden]{display:none!important}
+</style>
+</head>
+<body>
+<div id="app">
+  <div id="hud">
+    <div class="big">持珠<b id="hBalls">250</b></div>
+    <div>轉數<b id="hSpins">0</b></div>
+    <div>大當<b id="hJack">0</b></div>
+    <div style="text-align:right">最多持珠<b id="hBest">0</b></div>
+  </div>
+  <div id="wrap">
+    <canvas id="c"></canvas>
+    <div class="ov" id="menu"><div class="box">
+      <h2>柏青哥</h2>
+      <p>按住右下角<b>手把</b>連續發射，<b>左右滑動</b>調整力道。<br>珠子進入中央的<b>啟動口</b>就會轉數字，<br>三個相同就是 <b>大當</b>！下方大入賞口會打開。<br><b>3・7 中獎進入確變</b>，之後更容易再中。</p>
+      <button class="go" id="start">借 250 珠開始</button>
+    </div></div>
+    <div class="ov" id="over" hidden><div class="box">
+      <h2>珠子用完了</h2>
+      <p id="oSub"></p>
+      <button class="go" id="again">再借 250 珠</button>
+    </div></div>
+  </div>
+  <div id="ctrl">
+    <div id="info">按住手把發射・左右滑動調力道<div id="bar"><i></i></div></div>
+    <div id="knob"><div class="pt"></div><span id="kTxt">55%</span></div>
+  </div>
+</div>
+<script>
+(() => {
+const W = 400, H = 480, C = { x: 200, y: 270 }, RO = 190, RI = 174, BR = 4.5, G = 620;
+const cv = document.getElementById('c'), ctx = cv.getContext('2d');
+let scale = 1;
+function resize() {
+  const wr = document.getElementById('wrap').getBoundingClientRect();
+  const s = Math.min((wr.width - 4) / W, (wr.height - 4) / H), d = window.devicePixelRatio || 1;
+  cv.style.width = W * s + 'px'; cv.style.height = H * s + 'px';
+  cv.width = Math.round(W * s * d); cv.height = Math.round(H * s * d); scale = s * d;
+}
+addEventListener('resize', resize);
+
+/* 亂數（釘子固定排列） */
+let seed = 7; const prng = () => (seed = (seed * 16807) % 2147483647) / 2147483647;
+
+/* 音效 */
+let ac = null, lastClk = 0;
+function initAudio() { if (!ac) { try { ac = new (window.AudioContext || window.webkitAudioContext)(); } catch (e) {} } else if (ac.state === 'suspended') ac.resume(); }
+function tone(f, d, type = 'sine', v = .04, f2, delay = 0) {
+  if (!ac) return; const t = ac.currentTime + delay, o = ac.createOscillator(), g = ac.createGain();
+  o.type = type; o.frequency.setValueAtTime(f, t); if (f2) o.frequency.exponentialRampToValueAtTime(f2, t + d);
+  g.gain.setValueAtTime(v, t); g.gain.exponentialRampToValueAtTime(.0001, t + d);
+  o.connect(g).connect(ac.destination); o.start(t); o.stop(t + d + .02);
+}
+const clk = v => { const n = performance.now(); if (n - lastClk < 30) return; lastClk = n; tone(3200 + Math.random() * 1500, .03, 'sine', Math.min(.025, v)); };
+const sPay = n => { for (let i = 0; i < Math.min(n, 6); i++) tone(1800 + i * 120, .05, 'square', .02, null, i * .04); };
+const sReach = () => { tone(300, .5, 'sawtooth', .05, 900); tone(310, .5, 'sawtooth', .04, 920, .15); };
+const sJack = () => { [523, 659, 784, 1047, 784, 1047, 1319].forEach((f, i) => tone(f, .22, 'square', .05, null, i * .12)); };
+
+/* 台面幾何 */
+const walls = [];
+const seg = (x1, y1, x2, y2, o = {}) => { const s = { x1, y1, x2, y2, e: .3, on: true, ...o }; walls.push(s); return s; };
+const P = (a, r) => [C.x + Math.cos(a * Math.PI / 180) * r, C.y + Math.sin(a * Math.PI / 180) * r];
+// 內軌（發射通道內側）100°→235°
+for (let a = 100; a < 235; a += 5) seg(...P(a, RI), ...P(Math.min(a + 5, 235), RI), { e: .2 });
+seg(...P(100, RI - 2), ...P(100, RO + 2), { e: .1 });   // 通道底
+const STOPPER = [...P(318, RO + 3), ...P(327, RO - 17)];
+seg(...STOPPER, { e: .35 });   // 右上止球器：把沿外軌的珠子彈進盤面
+// 液晶外框
+const SCR = { x0: 132, y0: 112, x1: 268, y1: 238 };
+seg(SCR.x0 - 4, SCR.y0 + 4, 200, SCR.y0 - 12, { e: .25 }); seg(200, SCR.y0 - 12, SCR.x1 + 4, SCR.y0 + 4, { e: .25 });
+seg(SCR.x0 - 4, SCR.y0 + 4, SCR.x0 - 4, SCR.y1); seg(SCR.x1 + 4, SCR.y0 + 4, SCR.x1 + 4, SCR.y1);
+seg(SCR.x0 - 4, SCR.y1, 186, SCR.y1 + 12, { e: .1 }); seg(SCR.x1 + 4, SCR.y1, 214, SCR.y1 + 12, { e: .1 }); // 下方ステージ（由ワープ進入）
+// 入賞口
+const POCKETS = [
+  { x: 200, y: 288, hw: 6.2, type: 'start', pay: 1, col: '#ff006e' },
+  { x: 112, y: 338, hw: 5.8, type: 'side', pay: 2, col: '#3a86ff' },
+  { x: 288, y: 338, hw: 5.8, type: 'side', pay: 2, col: '#3a86ff' },
+  { x: 120, y: 390, hw: 5.8, type: 'side', pay: 2, col: '#06d6a0' },
+  { x: 280, y: 390, hw: 5.8, type: 'side', pay: 2, col: '#06d6a0' },
+];
+POCKETS.forEach(p => { p.flash = 0;
+  seg(p.x - p.hw - 1.5, p.y - 2, p.x - p.hw - 1.5, p.y + 9); seg(p.x + p.hw + 1.5, p.y - 2, p.x + p.hw + 1.5, p.y + 9);
+  seg(p.x - p.hw - 1.5, p.y + 9, p.x + p.hw + 1.5, p.y + 9, { e: .1 });
+});
+// 大入賞口（アタッカー）
+const ATK = { x0: 168, x1: 232, y: 405 };
+const lidA = seg(ATK.x0, ATK.y + 1, 200, ATK.y - 6, { e: .2 }), lidB = seg(200, ATK.y - 6, ATK.x1, ATK.y + 1, { e: .2 });
+const lid = { set on(v) { lidA.on = lidB.on = v; } };
+seg(ATK.x0 - 1, ATK.y + 3, ATK.x0 - 1, ATK.y + 12); seg(ATK.x1 + 1, ATK.y + 3, ATK.x1 + 1, ATK.y + 12);
+seg(ATK.x0, ATK.y + 12, ATK.x1, ATK.y + 12, { e: .1 });
+// 風車
+const MILLS = [{ x: 76, y: 262, a: 0, w: 5 }, { x: 324, y: 262, a: 0, w: -5 }];
+
+// 釘子
+const pins = [];
+const excl = (x, y) =>
+  (x > SCR.x0 - 14 && x < SCR.x1 + 14 && y > SCR.y0 - 22 && y < SCR.y1 + 18) ||
+  POCKETS.some(p => Math.abs(x - p.x) < p.hw + 8 && y > p.y - 17 && y < p.y + 14) ||
+  MILLS.some(m => Math.hypot(x - m.x, y - m.y) < 22) ||
+  (x > 184 && x < 216 && y > 240 && y < 274) ||
+  (x > ATK.x0 - 8 && x < ATK.x1 + 8 && y > ATK.y - 12 && y < ATK.y + 16) || y > 432;
+for (let r = 0, y = 96; y < 435; r++, y += 15) {
+  for (let x = 30 + (r % 2) * 8.5; x < 372; x += 17) {
+    const lim = (x > C.x || y < 132) ? RO - 10 : RI - 10;
+    if (Math.hypot(x - C.x, y - C.y) > lim) continue;
+    if (excl(x, y) || prng() < .14) continue;
+    pins.push({ x, y, f: 0 });
+  }
+}
+// 命釘（啟動口兩側）與入賞口引導釘
+pins.push({ x: 189, y: 279, f: 0, key: true }, { x: 211, y: 279, f: 0, key: true });
+POCKETS.slice(1).forEach(p => pins.push({ x: p.x - p.hw - 6, y: p.y - 8, f: 0 }, { x: p.x + p.hw + 6, y: p.y - 8, f: 0 }));
+pins.push({ x: ATK.x0 - 8, y: ATK.y - 10, f: 0 }, { x: ATK.x1 + 8, y: ATK.y - 10, f: 0 });
+// 空間格（加速碰撞）
+const GRID = 20, pinGrid = new Map();
+pins.forEach(p => { const k = ((p.x / GRID) | 0) + ',' + ((p.y / GRID) | 0); (pinGrid.get(k) || pinGrid.set(k, []).get(k)).push(p); });
+
+/* 遊戲狀態 */
+let balls = [], stock = 250, spins = 0, jacks = 0, best = 250, hold = 0, spin = null, kakuhen = false, fever = null, state = 'menu';
+let probMul = 1, warpFx = 0, firing = false, strength = .55, fireT = 0, time = 0, popups = [], lcdMsg = '', lcdMsgT = 0, flashT = 0;
+try { best = +localStorage.getItem('pachiBest') || 250; } catch (e) {}
+
+function hudUpd() {
+  document.getElementById('hBalls').textContent = stock;
+  document.getElementById('hSpins').textContent = spins;
+  document.getElementById('hJack').textContent = jacks;
+  if (stock > best) { best = stock; try { localStorage.setItem('pachiBest', best); } catch (e) {} }
+  document.getElementById('hBest').textContent = best;
+}
+function startGame() {
+  balls = []; stock = 250; spins = 0; jacks = 0; hold = 0; spin = null; kakuhen = false; fever = null; popups = [];
+  state = 'play'; lcdMsg = ''; document.getElementById('menu').hidden = true; document.getElementById('over').hidden = true; hudUpd();
+}
+function fire() {
+  if (stock <= 0) return;
+  stock--; hudUpd();
+  const a = 112, [x, y] = P(a, 182), rad = a * Math.PI / 180;
+  const v = (765 + strength * 225) * (0.985 + Math.random() * .03);
+  balls.push({ x, y, vx: -Math.sin(rad) * v, vy: Math.cos(rad) * v, inField: false });
+  tone(140, .03, 'square', .02);
+}
+
+/* 抽獎 */
+function rollSpin() {
+  hold--; spins++; hudUpd();
+  const prob = (kakuhen ? 1 / 14 : 1 / 45) * probMul;
+  const win = Math.random() < prob;
+  let a, b, c, reach = false;
+  if (win) {
+    const kk = Math.random() < .4;
+    a = kk ? (Math.random() < .5 ? 3 : 7) : [1, 2, 4, 5, 6, 8, 9][(Math.random() * 7) | 0];
+    b = c = a; reach = true;
+  } else {
+    a = 1 + ((Math.random() * 9) | 0);
+    reach = Math.random() < (kakuhen ? .35 : .22);
+    c = reach ? a : 1 + ((Math.random() * 9) | 0);
+    if (!reach && c === a) c = a % 9 + 1;
+    b = reach ? (Math.random() < .5 ? a % 9 + 1 : (a + 7) % 9 + 1) : 1 + ((Math.random() * 9) | 0);
+    if (!reach && a === b && b === c) b = b % 9 + 1;
+  }
+  const k = kakuhen ? .6 : 1;
+  spin = { res: [a, b, c], win, reach, t: 0, stop: [1.1 * k, 1.7 * k, reach ? 1.7 * k + 2.6 : 2.3 * k], reachSounded: false, seeds: [Math.random() * 9, Math.random() * 9, Math.random() * 9] };
+}
+function spinUpdate(dt) {
+  if (fever) return;
+  if (!spin) { if (hold > 0) rollSpin(); return; }
+  spin.t += dt;
+  if (spin.reach && !spin.reachSounded && spin.t > spin.stop[1]) { spin.reachSounded = true; sReach(); }
+  if (spin.t > spin.stop[2] + .7) {
+    const s = spin; spin = null;
+    if (s.win) {
+      jacks++; hudUpd(); sJack(); flashT = 1.6;
+      const kk = s.res[0] === 3 || s.res[0] === 7;
+      fever = { n: s.res[0], kk, round: 0, open: false, t: -1.6, count: 0, rounds: 5 };
+    }
+  }
+}
+function feverUpdate(dt) {
+  if (!fever) return;
+  const f = fever; f.t += dt;
+  if (f.open) {
+    if (f.count >= 10 || f.t > 7) { f.open = false; f.t = 0; lid.on = true; if (f.round >= f.rounds) endFever(); }
+  } else if (f.t > (f.round === 0 ? 0 : 1.1)) {
+    f.round++; f.open = true; f.t = 0; f.count = 0; lid.on = false; tone(880, .15, 'square', .04);
+  }
+}
+function endFever() {
+  kakuhen = fever.kk; lcdMsg = kakuhen ? '確變突入！' : '通常模式'; lcdMsgT = 2.5; fever = null; lid.on = true;
+  if (kakuhen) sJack();
+}
+
+/* 物理 */
+function closest(px, py, s) {
+  const dx = s.x2 - s.x1, dy = s.y2 - s.y1;
+  let t = ((px - s.x1) * dx + (py - s.y1) * dy) / (dx * dx + dy * dy); t = Math.max(0, Math.min(1, t));
+  return [s.x1 + dx * t, s.y1 + dy * t];
+}
+function collideSeg(b, x1, y1, x2, y2, e, th = 1) {
+  const [cx, cy] = closest(b.x, b.y, { x1, y1, x2, y2 });
+  let nx = b.x - cx, ny = b.y - cy; const d = Math.hypot(nx, ny), R = BR + th;
+  if (d >= R || d === 0) return;
+  nx /= d; ny /= d; b.x = cx + nx * R; b.y = cy + ny * R;
+  const vn = b.vx * nx + b.vy * ny; if (vn < 0) { b.vx -= (1 + e) * vn * nx; b.vy -= (1 + e) * vn * ny; }
+}
+function step(dt) {
+  MILLS.forEach(m => m.a += m.w * dt);
+  for (const b of balls) {
+    b.vy += G * dt;
+    const sp = Math.hypot(b.vx, b.vy); if (sp > 1100) { b.vx *= 1100 / sp; b.vy *= 1100 / sp; }
+    b.x += b.vx * dt; b.y += b.vy * dt;
+    // 外軌
+    let dx = b.x - C.x, dy = b.y - C.y, d = Math.hypot(dx, dy);
+    if (d > RO - BR) {
+      const nx = dx / d, ny = dy / d; b.x = C.x + nx * (RO - BR); b.y = C.y + ny * (RO - BR);
+      const vn = b.vx * nx + b.vy * ny; if (vn > 0) { b.vx -= 1.1 * vn * nx; b.vy -= 1.1 * vn * ny; }
+      b.vx *= .9995; b.vy *= .9995;
+    }
+    if (!b.inField && (d < RI - 6 || b.y < 135)) b.inField = true;
+    // ワープ：碰到液晶兩側的入口，有機率被吸到下方ステージ
+    if (!b.warped && b.y > 160 && b.y < 196 && (Math.abs(b.x - (SCR.x0 - 4)) < 7.5 || Math.abs(b.x - (SCR.x1 + 4)) < 7.5)) {
+      b.warped = true;
+      if (Math.random() < .45) { const left = b.x < 200; b.x = left ? 150 : 250; b.y = SCR.y1 - 3; b.vx = (left ? 1 : -1) * (40 + Math.random() * 90); b.vy = 0; warpFx = .5; }
+    }
+    for (const s of walls) if (s.on) collideSeg(b, s.x1, s.y1, s.x2, s.y2, s.e, 1.2);
+    for (const m of MILLS) {
+      if (Math.abs(b.x - m.x) > 22 || Math.abs(b.y - m.y) > 22) continue;
+      for (let i = 0; i < 4; i++) { const a = m.a + i * Math.PI / 2; collideSeg(b, m.x, m.y, m.x + Math.cos(a) * 13, m.y + Math.sin(a) * 13, .4, 1.5); }
+    }
+    const gx = (b.x / GRID) | 0, gy = (b.y / GRID) | 0;
+    for (let ix = gx - 1; ix <= gx + 1; ix++) for (let iy = gy - 1; iy <= gy + 1; iy++) {
+      const cell = pinGrid.get(ix + ',' + iy); if (!cell) continue;
+      for (const p of cell) {
+        let nx = b.x - p.x, ny = b.y - p.y; const dd = Math.hypot(nx, ny), R = BR + 1.8;
+        if (dd >= R || dd === 0) continue;
+        nx /= dd; ny /= dd; b.x = p.x + nx * R; b.y = p.y + ny * R;
+        const vn = b.vx * nx + b.vy * ny;
+        if (vn < 0) { b.vx -= 1.45 * vn * nx; b.vy -= 1.45 * vn * ny; const j = (Math.random() - .5) * 25; b.vx += -ny * j; b.vy += nx * j; if (-vn > 70) { p.f = 1; clk(-vn / 12000); } }
+      }
+    }
+  }
+  for (let i = 0; i < balls.length; i++) for (let j = i + 1; j < balls.length; j++) {
+    const a = balls[i], c = balls[j]; const dx = c.x - a.x, dy = c.y - a.y;
+    if (Math.abs(dx) > 9 || Math.abs(dy) > 9) continue;
+    const d = Math.hypot(dx, dy); if (d >= BR * 2 || d === 0) continue;
+    const nx = dx / d, ny = dy / d, ov = BR * 2 - d;
+    a.x -= nx * ov / 2; a.y -= ny * ov / 2; c.x += nx * ov / 2; c.y += ny * ov / 2;
+    const vr = (a.vx - c.vx) * nx + (a.vy - c.vy) * ny; if (vr > 0) { const J = .92 * vr; a.vx -= J * nx; a.vy -= J * ny; c.vx += J * nx; c.vy += J * ny; }
+  }
+}
+function pay(n, x, y, col) { stock += n; hudUpd(); popups.push({ x, y, t: 1, s: '+' + n, col }); sPay(n); }
+function update(dt) {
+  time += dt; warpFx = Math.max(0, warpFx - dt); lcdMsgT = Math.max(0, lcdMsgT - dt); flashT = Math.max(0, flashT - dt);
+  pins.forEach(p => p.f = Math.max(0, p.f - dt * 6)); POCKETS.forEach(p => p.flash = Math.max(0, p.flash - dt * 2));
+  popups.forEach(p => { p.t -= dt; p.y -= 25 * dt; }); popups = popups.filter(p => p.t > 0);
+  if (state !== 'play') return;
+  if (firing) { fireT -= dt; if (fireT <= 0) { fire(); fireT = .2; } } else fireT = 0;
+  for (let i = 0; i < 6; i++) step(dt / 6);
+  // 防卡珠：靜止太久就輕推一下（像台子的震動）
+  for (const b of balls) { if (Math.hypot(b.vx, b.vy) < 15) { b.still = (b.still || 0) + dt; if (b.still > .8) { b.vx += (Math.random() - .5) * 140; b.vy -= 40; b.still = 0; } } else b.still = 0; }
+  balls = balls.filter(b => {
+    for (const p of POCKETS) if (Math.abs(b.x - p.x) < p.hw && b.y > p.y - 1 && b.y < p.y + 9) {
+      p.flash = 1; pay(p.pay, p.x, p.y - 10, p.col);
+      p.hits = (p.hits || 0) + 1; if (p.type === 'start') { if (hold < 4) hold++; }
+      return false;
+    }
+    if (fever && fever.open && b.x > ATK.x0 && b.x < ATK.x1 && b.y > ATK.y && b.y < ATK.y + 12) { fever.count++; pay(15, b.x, ATK.y - 8, '#ffd60a'); return false; }
+    const d = Math.hypot(b.x - C.x, b.y - C.y);
+    // ファール：力道不足掉回發射口，退還珠子
+    if (!b.inField && d > RI - 2 && b.vy >= 0 && b.y > 436 && b.x < C.x) { stock++; hudUpd(); return false; }
+    if (b.inField && b.y > 426) return false;   // アウト口
+    if (d > RO + 20) return false;
+    b.age = (b.age || 0) + dt; if (b.age > 25) return false;   // 保險：極少數卡住的珠子
+    return true;
+  });
+  spinUpdate(dt); feverUpdate(dt);
+  if (stock <= 0 && balls.length === 0 && !fever && !spin && hold === 0 && state === 'play') gameOver();
+}
+function gameOver() {
+  state = 'over'; firing = false; document.getElementById('knob').classList.remove('on');
+  document.getElementById('oSub').innerHTML = `總轉數 ${spins}　大當 ${jacks} 次<br>最多持珠紀錄 ${best}`;
+  document.getElementById('over').hidden = false;
+}
+
+/* 手把 */
+const knob = document.getElementById('knob');
+let kx = null;
+function setStrength(v) {
+  strength = Math.max(0, Math.min(1, v));
+  knob.querySelector('.pt').style.transform = `rotate(${-120 + strength * 240}deg)`;
+  document.getElementById('kTxt').textContent = Math.round(strength * 100) + '%';
+  document.querySelector('#bar i').style.width = strength * 100 + '%';
+}
+knob.addEventListener('pointerdown', e => { initAudio(); if (state !== 'play') return; knob.setPointerCapture(e.pointerId); kx = e.clientX; firing = true; knob.classList.add('on'); });
+knob.addEventListener('pointermove', e => { if (kx === null) return; setStrength(strength + (e.clientX - kx) / 160); kx = e.clientX; });
+const kUp = () => { kx = null; firing = false; knob.classList.remove('on'); };
+knob.addEventListener('pointerup', kUp); knob.addEventListener('pointercancel', kUp);
+addEventListener('keydown', e => {
+  if (e.key === ' ') { e.preventDefault(); initAudio(); if (state === 'play') firing = true; }
+  if (e.key === 'ArrowLeft') setStrength(strength - .03); if (e.key === 'ArrowRight') setStrength(strength + .03);
+});
+addEventListener('keyup', e => { if (e.key === ' ') firing = false; });
+document.getElementById('start').onclick = () => { initAudio(); startGame(); };
+document.getElementById('again').onclick = () => { initAudio(); startGame(); };
+
+/* 背景 */
+const bg = document.createElement('canvas'); bg.width = W * 2; bg.height = H * 2;
+(() => {
+  const g = bg.getContext('2d'); g.scale(2, 2);
+  const fr = g.createLinearGradient(0, 0, 0, H); fr.addColorStop(0, '#2a0f45'); fr.addColorStop(1, '#120720');
+  g.fillStyle = fr; g.fillRect(0, 0, W, H);
+  // 盤面
+  const pf = g.createRadialGradient(C.x, C.y - 40, 30, C.x, C.y, RO);
+  pf.addColorStop(0, '#3b1d6e'); pf.addColorStop(.6, '#22104a'); pf.addColorStop(1, '#130830');
+  g.fillStyle = pf; g.beginPath(); g.arc(C.x, C.y, RO, 0, Math.PI * 2); g.fill();
+  // 盤面圖案：放射光
+  g.save(); g.beginPath(); g.arc(C.x, C.y, RI, 0, Math.PI * 2); g.clip();
+  for (let i = 0; i < 24; i++) { g.fillStyle = i % 2 ? 'rgba(255,79,216,.05)' : 'rgba(58,134,255,.05)'; g.beginPath(); g.moveTo(C.x, C.y - 60); g.arc(C.x, C.y - 60, 300, i / 24 * Math.PI * 2, (i + 1) / 24 * Math.PI * 2); g.fill(); }
+  for (let i = 0; i < 70; i++) { g.fillStyle = `rgba(255,255,255,${Math.random() * .5})`; g.beginPath(); g.arc(Math.random() * W, Math.random() * H, Math.random() * 1.3, 0, Math.PI * 2); g.fill(); }
+  g.restore();
+  // 外軌
+  g.strokeStyle = '#c0c4d6'; g.lineWidth = 3; g.beginPath(); g.arc(C.x, C.y, RO, 0, Math.PI * 2); g.stroke();
+  g.strokeStyle = '#ffffff55'; g.lineWidth = 1; g.beginPath(); g.arc(C.x, C.y, RO - 2, 0, Math.PI * 2); g.stroke();
+  // 內軌
+  g.strokeStyle = '#c0c4d6'; g.lineWidth = 2.5; g.beginPath(); g.arc(C.x, C.y, RI, 100 * Math.PI / 180, 235 * Math.PI / 180); g.stroke();
+  // 液晶外框與ステージ
+  g.fillStyle = '#d4af37'; g.beginPath(); g.moveTo(SCR.x0 - 6, SCR.y0 + 4); g.lineTo(200, SCR.y0 - 14); g.lineTo(SCR.x1 + 6, SCR.y0 + 4); g.lineTo(SCR.x1 + 6, SCR.y1); g.lineTo(214, SCR.y1 + 14); g.lineTo(186, SCR.y1 + 14); g.lineTo(SCR.x0 - 6, SCR.y1); g.closePath(); g.fill();
+  g.fillStyle = '#7a5c12'; g.font = '800 9px system-ui'; g.textAlign = 'center'; g.fillText('★ LUCKY ★', 200, SCR.y0 - 1);
+  // アウト口
+  g.fillStyle = '#05020a'; g.beginPath(); g.ellipse(200, 450, 18, 9, 0, 0, Math.PI * 2); g.fill();
+  g.fillStyle = '#ffffff66'; g.font = '700 8px system-ui'; g.fillText('OUT', 200, 453);
+  // 標題
+  g.font = '900 20px system-ui'; g.fillStyle = '#ff4fd8'; g.shadowColor = '#ff4fd8'; g.shadowBlur = 12;
+  g.fillText('PACHINKO', 200, 30); g.shadowBlur = 0;
+})();
+
+/* 繪圖 */
+const NUMCOL = ['', '#4cc9f0', '#80ed99', '#ff4fd8', '#ffd60a', '#4cc9f0', '#80ed99', '#ff006e', '#ffd60a', '#c77dff'];
+function reelNum(i) {
+  if (!spin) return lastRes[i];
+  const t = spin.t, st = spin.stop[i];
+  if (t >= st) return spin.res[i];
+  const speed = (i === 1 && spin.reach && t > spin.stop[1]) ? Math.max(3, 18 - (t - spin.stop[1]) * 6) : 18;
+  return 1 + (((spin.seeds[i] + t * speed) | 0) % 9);
+}
+let lastRes = [3, 5, 8];
+function drawLCD() {
+  const { x0, y0, x1, y1 } = SCR, w = x1 - x0, h = y1 - y0;
+  ctx.save(); ctx.beginPath(); ctx.rect(x0, y0, w, h); ctx.clip();
+  const lg = ctx.createLinearGradient(0, y0, 0, y1);
+  const hue = fever ? (time * 200) % 360 : kakuhen ? 350 : 230;
+  lg.addColorStop(0, `hsl(${hue},70%,${fever ? 40 : 18}%)`); lg.addColorStop(1, `hsl(${(hue + 40) % 360},70%,8%)`);
+  ctx.fillStyle = lg; ctx.fillRect(x0, y0, w, h);
+  ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
+  if (fever) {
+    const f = fever;
+    ctx.fillStyle = '#fff'; ctx.font = '900 22px system-ui'; ctx.shadowColor = '#ff4fd8'; ctx.shadowBlur = 12;
+    ctx.fillText(f.round === 0 ? '大當り!!' : `ROUND ${f.round}/${f.rounds}`, 200, y0 + 30);
+    ctx.font = '900 40px system-ui'; ctx.fillStyle = NUMCOL[f.n]; ctx.fillText(`${f.n}${f.n}${f.n}`, 200, y0 + 70);
+    ctx.shadowBlur = 0; ctx.font = '700 12px system-ui'; ctx.fillStyle = '#fff';
+    ctx.fillText(f.open ? `入賞 ${f.count}/10　右下大入賞口打開中！` : (f.round === 0 ? (f.kk ? '確變大當！' : '通常大當') : '下一回合準備…'), 200, y0 + 108);
+  } else {
+    if (spin && spin.t > spin.stop[2]) lastRes = spin.res.slice();
+    const bw = 38, gap = 6, sx = 200 - (bw * 3 + gap * 2) / 2;
+    const order = [0, 1, 2]; // 左 中 右
+    const reachOn = spin && spin.reach && spin.t > spin.stop[1] && spin.t < spin.stop[2];
+    for (let k = 0; k < 3; k++) {
+      // 停止順序：左(0)→右(2)→中(1)
+      const ri = k === 0 ? 0 : k === 1 ? 1 : 2;
+      const stopIdx = ri === 0 ? 0 : ri === 2 ? 1 : 2;
+      const n = !spin ? lastRes[ri] : (spin.t >= spin.stop[stopIdx] ? spin.res[ri] : 1 + (((spin.seeds[ri] + spin.t * ((ri === 1 && reachOn) ? Math.max(3, 18 - (spin.t - spin.stop[1]) * 6) : 18)) | 0) % 9));
+      const x = sx + k * (bw + gap);
+      ctx.fillStyle = 'rgba(0,0,0,.45)'; ctx.fillRect(x, y0 + 30, bw, 58);
+      ctx.strokeStyle = reachOn && ri === 1 ? `hsl(${time * 600 % 360},90%,60%)` : '#ffffff44'; ctx.lineWidth = 2; ctx.strokeRect(x, y0 + 30, bw, 58);
+      ctx.font = '900 40px system-ui'; ctx.fillStyle = NUMCOL[n]; ctx.shadowColor = NUMCOL[n]; ctx.shadowBlur = 10;
+      const moving = spin && spin.t < spin.stop[stopIdx];
+      ctx.fillText(n, x + bw / 2, y0 + 60 + (moving ? Math.sin(time * 60) * 3 : 0)); ctx.shadowBlur = 0;
+    }
+    ctx.font = '800 13px system-ui';
+    if (reachOn) { ctx.fillStyle = Math.floor(time * 8) % 2 ? '#ff4fd8' : '#ffd60a'; ctx.font = '900 18px system-ui'; ctx.fillText('リーチ！', 200, y0 + 15); }
+    else if (lcdMsgT > 0) { ctx.fillStyle = '#ffd60a'; ctx.fillText(lcdMsg, 200, y0 + 15); }
+    else { ctx.fillStyle = kakuhen ? '#ff4fd8' : '#ffffffaa'; ctx.fillText(kakuhen ? '◆ 確變中 ◆' : '數字對齊就大當', 200, y0 + 15); }
+    // 保留
+    ctx.font = '600 10px system-ui'; ctx.fillStyle = '#ffffffaa'; ctx.fillText('保留', 165, y1 - 15);
+    for (let i = 0; i < 4; i++) { ctx.fillStyle = i < hold ? '#ffd60a' : '#ffffff22'; ctx.beginPath(); ctx.arc(185 + i * 14, y1 - 15, 4.5, 0, Math.PI * 2); ctx.fill(); }
+  }
+  ctx.restore();
+}
+function draw() {
+  ctx.setTransform(scale, 0, 0, scale, 0, 0);
+  ctx.drawImage(bg, 0, 0, W, H);
+  drawLCD();
+  // 邊框燈
+  for (let i = 0; i < 36; i++) {
+    const a = i / 36 * Math.PI * 2, on = fever ? (Math.floor(time * 14) + i) % 3 === 0 : (Math.floor(time * 3) + i) % 6 === 0;
+    const [x, y] = [C.x + Math.cos(a) * (RO + 8), C.y + Math.sin(a) * (RO + 8)];
+    if (y > H - 4) continue;
+    ctx.fillStyle = on ? (fever ? `hsl(${(i * 30 + time * 300) % 360},90%,60%)` : kakuhen ? '#ff4fd8' : '#4cc9f0') : '#ffffff18';
+    ctx.beginPath(); ctx.arc(x, y, 2.6, 0, Math.PI * 2); ctx.fill();
+  }
+  ctx.strokeStyle = '#c0c4d6'; ctx.lineWidth = 3; ctx.beginPath(); ctx.moveTo(STOPPER[0], STOPPER[1]); ctx.lineTo(STOPPER[2], STOPPER[3]); ctx.stroke();
+  // ワープ入口
+  [SCR.x0 - 6, SCR.x1 + 6].forEach(x => { ctx.fillStyle = warpFx > 0 ? '#fff' : `hsl(${time * 200 % 360},90%,60%)`; ctx.fillRect(x - 1.5, 162, 3, 32); });
+  // 入賞口
+  POCKETS.forEach(p => {
+    ctx.fillStyle = p.flash > .2 ? '#fff' : p.col; ctx.shadowColor = p.col; ctx.shadowBlur = 6 + p.flash * 16;
+    ctx.fillRect(p.x - p.hw - 3, p.y - 3, 3, 13); ctx.fillRect(p.x + p.hw, p.y - 3, 3, 13); ctx.fillRect(p.x - p.hw - 3, p.y + 8, p.hw * 2 + 6, 3);
+    ctx.shadowBlur = 0; ctx.fillStyle = '#ffffffcc'; ctx.font = '700 8px system-ui'; ctx.textAlign = 'center';
+    ctx.fillText(p.type === 'start' ? '啟動' : p.pay, p.x, p.y + 19);
+  });
+  // 大入賞口
+  const open = fever && fever.open;
+  ctx.fillStyle = open ? '#05020a' : '#2b1b45'; ctx.fillRect(ATK.x0, ATK.y, ATK.x1 - ATK.x0, 12);
+  ctx.fillStyle = open ? `hsl(${time * 500 % 360},90%,60%)` : '#d4af37';
+  if (open) { ctx.save(); ctx.translate(ATK.x0, ATK.y); ctx.rotate(-.9); ctx.fillRect(0, -3, ATK.x1 - ATK.x0, 4); ctx.restore(); }
+  else { ctx.beginPath(); ctx.moveTo(ATK.x0, ATK.y + 2); ctx.lineTo(200, ATK.y - 5); ctx.lineTo(ATK.x1, ATK.y + 2); ctx.lineTo(ATK.x1, ATK.y + 5); ctx.lineTo(200, ATK.y - 2); ctx.lineTo(ATK.x0, ATK.y + 5); ctx.closePath(); ctx.fill(); }
+  ctx.fillStyle = '#fff'; ctx.font = '700 8px system-ui'; ctx.textAlign = 'center'; ctx.fillText(open ? 'OPEN!' : 'ATTACKER', 200, ATK.y + 9);
+  // 風車
+  MILLS.forEach(m => {
+    for (let i = 0; i < 4; i++) { const a = m.a + i * Math.PI / 2; ctx.strokeStyle = i % 2 ? '#ff4fd8' : '#4cc9f0'; ctx.lineWidth = 3; ctx.lineCap = 'round';
+      ctx.beginPath(); ctx.moveTo(m.x, m.y); ctx.lineTo(m.x + Math.cos(a) * 13, m.y + Math.sin(a) * 13); ctx.stroke(); }
+    ctx.fillStyle = '#ffd60a'; ctx.beginPath(); ctx.arc(m.x, m.y, 3.5, 0, Math.PI * 2); ctx.fill();
+  });
+  // 釘子
+  for (const p of pins) { ctx.fillStyle = p.f > 0 ? '#fff' : (p.key ? '#ffd60a' : '#b9bfd3'); ctx.beginPath(); ctx.arc(p.x, p.y, 1.8 + p.f * .8, 0, Math.PI * 2); ctx.fill(); }
+  // 珠子
+  for (const b of balls) {
+    const g = ctx.createRadialGradient(b.x - 1.5, b.y - 1.5, .3, b.x, b.y, BR);
+    g.addColorStop(0, '#fff'); g.addColorStop(.5, '#cfd4e2'); g.addColorStop(1, '#5d6478');
+    ctx.fillStyle = g; ctx.beginPath(); ctx.arc(b.x, b.y, BR, 0, Math.PI * 2); ctx.fill();
+  }
+  popups.forEach(p => { ctx.globalAlpha = Math.min(1, p.t * 2); ctx.fillStyle = p.col; ctx.font = '900 13px system-ui'; ctx.textAlign = 'center'; ctx.fillText(p.s, p.x, p.y); ctx.globalAlpha = 1; });
+  if (flashT > 0) { ctx.fillStyle = `rgba(255,255,255,${(Math.sin(flashT * 30) + 1) * .18 * flashT})`; ctx.fillRect(0, 0, W, H); }
+}
+
+let last = performance.now();
+function loop(t) { const dt = Math.min(.033, (t - last) / 1000); last = t; update(dt); draw(); requestAnimationFrame(loop); }
+resize(); setStrength(.55); hudUpd(); requestAnimationFrame(loop);
+window.__pk = { get balls() { return balls; }, get stock() { return stock; }, get state() { return state; }, get fever() { return fever; }, get spins() { return spins; }, get jacks() { return jacks; }, get hold() { return hold; }, update, startGame, setStrength, setFiring: v => firing = v, fire, POCKETS, pins, setKakuhen: v => kakuhen = v, setProbMul: v => probMul = v };
+})();
+</script>
+</body>
+</html>

@@ -1,0 +1,371 @@
+<!DOCTYPE html>
+<html lang="zh-Hant">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1,maximum-scale=1,user-scalable=no">
+<title>打小人</title>
+<style>
+  html,body{margin:0;height:100%;background:#2a0b08;color:#fff1d6;font-family:system-ui,-apple-system,"PingFang TC","Noto Sans TC",serif;overflow:hidden;touch-action:none;user-select:none;-webkit-user-select:none}
+  #app{max-width:520px;margin:0 auto;height:100%;display:flex;flex-direction:column}
+  header{display:flex;justify-content:space-between;align-items:center;padding:8px 14px 2px}
+  h1{margin:0;font-size:20px;color:#ffd166;letter-spacing:2px}
+  #stat{font-size:12px;opacity:.85;text-align:right}
+  #stat b{color:#ffd166;font-size:15px}
+  #wrap{position:relative;flex:1;min-height:0;display:flex;justify-content:center;align-items:center}
+  canvas{display:block;touch-action:none}
+  #step{padding:6px 14px 14px;text-align:center}
+  #stepTxt{font-size:15px;min-height:22px;color:#ffe8b3}
+  #bar{height:10px;background:#ffffff1a;border-radius:6px;overflow:hidden;margin:6px 0 0}
+  #bar i{display:block;height:100%;width:0;background:linear-gradient(90deg,#ffd166,#e63946);transition:width .15s}
+  .steps{display:flex;justify-content:space-between;font-size:11px;margin-top:8px;opacity:.75}
+  .steps span.on{color:#ffd166;opacity:1;font-weight:800}
+  .ov{position:absolute;inset:0;display:flex;align-items:center;justify-content:center;background:#0006}
+  .box{background:#4a120c;border:2px solid #d4a017;border-radius:16px;padding:18px;width:min(310px,86%);text-align:center;box-shadow:0 0 30px #d4a01755}
+  .box h2{margin:0 0 6px;font-size:26px;color:#ffd166}
+  .box p{font-size:13px;line-height:1.7;margin:4px 0 10px;opacity:.9}
+  input{width:100%;box-sizing:border-box;font-size:17px;padding:10px;border-radius:10px;border:2px solid #d4a017;background:#fff8e7;color:#5a1a10;text-align:center}
+  .chips{display:flex;flex-wrap:wrap;gap:6px;justify-content:center;margin:10px 0}
+  .chips button{background:#ffffff14;border:1px solid #d4a01788;color:#fff1d6;border-radius:14px;padding:5px 10px;font-size:13px}
+  .go{width:100%;background:#c1121f;color:#fff;border:0;border-radius:12px;padding:13px;font-size:17px;font-weight:800;margin-top:4px}
+  .card{background:linear-gradient(#fff6d8,#ffe7a3);color:#7a1f10;border:3px double #c1121f;border-radius:10px;padding:18px 12px;margin:6px 0 12px}
+  .card .t{font-size:13px;letter-spacing:6px;color:#c1121f}
+  .card .f{font-size:24px;font-weight:900;margin-top:8px;line-height:1.4}
+  [hidden]{display:none!important}
+</style>
+</head>
+<body>
+<div id="app">
+  <header><h1>打小人</h1><div id="stat">累計打走 <b id="total">0</b> 個小人</div></header>
+  <div id="wrap">
+    <canvas id="c"></canvas>
+    <div class="ov" id="write"><div class="box">
+      <h2>寫上小人</h2>
+      <p>兩欄都可以略過，只會顯示在你自己的畫面上</p>
+      <div style="text-align:left;font-size:12px;margin:2px 0 4px;opacity:.85">你的名字（祈福人，會寫在好運籤上）</div>
+      <input id="me" maxlength="10" placeholder="例如：Tony">
+      <div style="text-align:left;font-size:12px;margin:10px 0 4px;opacity:.85">小人名字（寫在紙人身上）</div>
+      <input id="name" maxlength="8" placeholder="例如：是非小人">
+      <div class="chips"><button>是非小人</button><button>爛桃花</button><button>霉運</button><button>口舌是非</button><button>拖延症</button><button>瑕疵布</button></div>
+      <button class="go" id="begin">開始打！</button>
+    </div></div>
+    <div class="ov" id="fortune" hidden><div class="box">
+      <h2>化解完成</h2>
+      <div class="card"><div class="t" id="fWho">好 運 籤</div><div class="f" id="fText"></div></div>
+      <p id="fStat"></p>
+      <button class="go" id="again">再打一個</button>
+    </div></div>
+  </div>
+  <div id="step">
+    <div id="stepTxt"></div>
+    <div id="bar"><i></i></div>
+    <div class="steps"><span data-s="beat">① 打小人</span><span data-s="tiger">② 祭白虎</span><span data-s="rice">③ 撒米</span><span data-s="burn">④ 化寶</span><span data-s="done">⑤ 好運籤</span></div>
+  </div>
+</div>
+<script>
+(() => {
+const W = 400, H = 560;
+const cv = document.getElementById('c'), ctx = cv.getContext('2d');
+let scale = 1, cssS = 1;
+function resize() {
+  const wr = document.getElementById('wrap').getBoundingClientRect();
+  const s = Math.min((wr.width - 4) / W, (wr.height - 4) / H), d = window.devicePixelRatio || 1;
+  cssS = s; cv.style.width = W * s + 'px'; cv.style.height = H * s + 'px';
+  cv.width = Math.round(W * s * d); cv.height = Math.round(H * s * d); scale = s * d;
+}
+addEventListener('resize', resize);
+
+/* 音效 */
+let ac = null;
+function initAudio() { if (!ac) { try { ac = new (window.AudioContext || window.webkitAudioContext)(); } catch (e) {} } else if (ac.state === 'suspended') ac.resume(); }
+function noise(d, v, lp, hp = 0) {
+  if (!ac) return; const n = ac.sampleRate * d, b = ac.createBuffer(1, n, ac.sampleRate), x = b.getChannelData(0);
+  for (let i = 0; i < n; i++) x[i] = (Math.random() * 2 - 1) * Math.pow(1 - i / n, 3);
+  const s = ac.createBufferSource(), f = ac.createBiquadFilter(), g = ac.createGain(); s.buffer = b; f.type = 'lowpass'; f.frequency.value = lp; g.gain.value = v;
+  let node = s.connect(f); if (hp) { const h = ac.createBiquadFilter(); h.type = 'highpass'; h.frequency.value = hp; node = node.connect(h); }
+  node.connect(g).connect(ac.destination); s.start();
+}
+function tone(f, d, type = 'sine', v = .06, f2) { if (!ac) return; const t = ac.currentTime, o = ac.createOscillator(), g = ac.createGain(); o.type = type; o.frequency.setValueAtTime(f, t); if (f2) o.frequency.exponentialRampToValueAtTime(f2, t + d); g.gain.setValueAtTime(v, t); g.gain.exponentialRampToValueAtTime(.0001, t + d); o.connect(g).connect(ac.destination); o.start(t); o.stop(t + d); }
+const sSlap = () => { noise(.09, .7, 2600); tone(180, .08, 'square', .05, 90); };
+const sRip = () => noise(.25, .35, 5000, 1500);
+const sGong = () => { tone(196, 1.6, 'sine', .12); tone(392, 1.2, 'triangle', .04); tone(587, .9, 'sine', .03); };
+const sRice = () => { for (let i = 0; i < 8; i++) setTimeout(() => noise(.03, .15, 8000, 3000), i * 25); };
+const sFire = () => noise(1.6, .25, 900);
+const vib = ms => { try { navigator.vibrate && navigator.vibrate(ms); } catch (e) {} };
+
+/* 場景 */
+const bg = document.createElement('canvas'); bg.width = W * 2; bg.height = H * 2;
+(() => {
+  const g = bg.getContext('2d'); g.scale(2, 2);
+  const wall = g.createLinearGradient(0, 0, 0, H); wall.addColorStop(0, '#5c0f0a'); wall.addColorStop(.6, '#8b1a10'); wall.addColorStop(1, '#3a0905');
+  g.fillStyle = wall; g.fillRect(0, 0, W, H);
+  // 木樑
+  g.fillStyle = '#3b1d0e'; g.fillRect(0, 0, W, 34); g.fillStyle = '#d4a017'; g.fillRect(0, 32, W, 4);
+  for (let x = 10; x < W; x += 48) { g.fillStyle = '#2a7f62'; g.fillRect(x, 6, 30, 20); g.fillStyle = '#d4a017'; g.fillRect(x + 12, 10, 6, 12); }
+  // 柱子
+  for (const x of [0, W - 34]) { const p = g.createLinearGradient(x, 0, x + 34, 0); p.addColorStop(0, '#6e0d06'); p.addColorStop(.5, '#c1121f'); p.addColorStop(1, '#6e0d06'); g.fillStyle = p; g.fillRect(x, 36, 34, H); }
+  // 對聯
+  g.fillStyle = '#e63946'; g.fillRect(44, 90, 26, 200); g.fillRect(W - 70, 90, 26, 200);
+  g.fillStyle = '#ffd166'; g.font = '700 18px "PingFang TC","Noto Sans TC",serif'; g.textAlign = 'center';
+  '驅邪避凶'.split('').forEach((c, i) => g.fillText(c, 57, 118 + i * 46));
+  '招財納福'.split('').forEach((c, i) => g.fillText(c, W - 57, 118 + i * 46));
+  // 石台
+  g.fillStyle = '#5a5552'; g.beginPath(); g.ellipse(200, 400, 140, 34, 0, 0, 7); g.fill();
+  g.fillStyle = '#7d7672'; g.beginPath(); g.ellipse(200, 392, 140, 30, 0, 0, 7); g.fill();
+  for (let i = 0; i < 60; i++) { g.fillStyle = `rgba(0,0,0,${Math.random() * .15})`; g.beginPath(); g.arc(200 + (Math.random() - .5) * 250, 392 + (Math.random() - .5) * 46, Math.random() * 3, 0, 7); g.fill(); }
+  // 香爐
+  g.fillStyle = '#8c6a1c'; g.beginPath(); g.moveTo(150, 540); g.lineTo(250, 540); g.lineTo(262, 486); g.lineTo(138, 486); g.closePath(); g.fill();
+  g.fillStyle = '#b8902a'; g.beginPath(); g.ellipse(200, 486, 66, 12, 0, 0, 7); g.fill();
+  g.fillStyle = '#3a2a10'; g.beginPath(); g.ellipse(200, 486, 56, 8, 0, 0, 7); g.fill();
+  g.fillStyle = '#d4a017'; g.font = '900 16px serif'; g.fillText('福', 200, 520);
+  for (const x of [184, 200, 216]) { g.strokeStyle = '#a0522d'; g.lineWidth = 2.5; g.beginPath(); g.moveTo(x, 486); g.lineTo(x + (x - 200) * .15, 440); g.stroke(); g.fillStyle = '#ff6b35'; g.beginPath(); g.arc(x + (x - 200) * .15, 439, 2, 0, 7); g.fill(); }
+})();
+
+/* 狀態 */
+const MAX_HITS = 30;
+let me = '', phase = 'write', label = '小人', hits = 0, startT = 0, time = 0, wrinkles = [], tears = [], shards = [], parts = [], texts = [], slaps = [];
+let squash = 0, tilt = 0, shake = 0, tiger = null, riceN = 0, burnT = 0, combo = 0, lastHit = 0;
+let total = 0; try { total = +localStorage.getItem('xiaorenTotal') || 0; } catch (e) {}
+document.getElementById('total').textContent = total;
+try { document.getElementById('me').value = localStorage.getItem('xiaorenMe') || ''; } catch (e) {}
+const FIG = { x: 200, y: 330, w: 96, h: 150 };
+const CHANTS = {
+  head: ['打你個小人頭，霉運通通溜', '打你個小人頭，煩惱全都丟'],
+  hand: ['打你個小人手，是非不再有', '打你個小人手，壞運快快走'],
+  foot: ['打你個小人腳，壞事全跑掉', '打你個小人腳，再也不來找'],
+  body: ['打你個小人嘴，閒話不再追', '打你個小人心，貴人來相親', '打你個小人眼，好運天天見'],
+};
+const FORTUNES = ['小人遠離\n貴人相助', '財源滾滾\n好運連連', '身體健康\n平安喜樂', '事事順心\n萬事如意', '口舌是非\n一掃而空', '升職加薪\n步步高升', '出入平安\n福星高照', '工作順利\n品質一次過'];
+
+function setStep(s, txt) {
+  phase = s; document.getElementById('stepTxt').textContent = txt;
+  document.querySelectorAll('.steps span').forEach(e => e.classList.toggle('on', e.dataset.s === s));
+}
+function setBar(v) { document.querySelector('#bar i').style.width = Math.min(100, v * 100) + '%'; }
+function begin() {
+  label = document.getElementById('name').value.trim() || '小人';
+  me = document.getElementById('me').value.trim();
+  try { localStorage.setItem('xiaorenMe', me); } catch (e) {}
+  hits = 0; wrinkles = []; tears = []; shards = []; parts = []; texts = []; slaps = []; riceN = 0; burnT = 0; tiger = null; combo = 0;
+  startT = time; document.getElementById('write').hidden = true; document.getElementById('fortune').hidden = true;
+  setStep('beat', (me ? me + '，' : '') + '點紙小人，用拖鞋拍下去！'); setBar(0);
+}
+
+/* 輸入 */
+document.querySelectorAll('.chips button').forEach(b => b.onclick = () => document.getElementById('name').value = b.textContent);
+document.getElementById('begin').onclick = () => { initAudio(); begin(); };
+document.getElementById('name').addEventListener('keydown', e => { if (e.key === 'Enter') { initAudio(); begin(); } });
+document.getElementById('again').onclick = () => { document.getElementById('fortune').hidden = true; document.getElementById('name').value = ''; document.getElementById('write').hidden = false; setStep('write', ''); setBar(0); };
+
+cv.addEventListener('pointerdown', e => {
+  initAudio();
+  const r = cv.getBoundingClientRect(), x = (e.clientX - r.left) / r.width * W, y = (e.clientY - r.top) / r.height * H;
+  if (phase === 'beat') beat(x, y);
+  else if (phase === 'tiger') feedTiger();
+  else if (phase === 'rice') sprinkle(x, y);
+  else if (phase === 'burn' && burnT === 0) burn();
+});
+
+function beat(x, y) {
+  slaps.push({ x, y, t: .3 });
+  const onFig = Math.abs(x - FIG.x) < FIG.w * .75 && Math.abs(y - FIG.y) < FIG.h * .7;
+  if (!onFig) { noise(.05, .2, 1200); return; }
+  hits++; sSlap(); vib(20);
+  combo = time - lastHit < .45 ? combo + 1 : 1; lastHit = time;
+  squash = 1; tilt = (Math.random() - .5) * .25; shake = .35;
+  // 皺摺
+  for (let i = 0; i < 2; i++) wrinkles.push({ x: (Math.random() - .5) * FIG.w, y: (Math.random() - .5) * FIG.h, a: Math.random() * 3.14, l: 14 + Math.random() * 26 });
+  if (hits > MAX_HITS * .35 && Math.random() < .55) { tears.push({ x: (Math.random() < .5 ? -1 : 1) * FIG.w / 2, y: (Math.random() - .5) * FIG.h * .8, l: 10 + Math.random() * 22 }); sRip(); }
+  for (let i = 0; i < 4; i++) parts.push({ x, y, vx: (Math.random() - .5) * 220, vy: -Math.random() * 200, t: .6, c: '#f2e2b0', r: 2 + Math.random() * 3, g: 600 });
+  // 部位口訣
+  const ry = (y - (FIG.y - FIG.h / 2)) / FIG.h, rx = Math.abs(x - FIG.x) / (FIG.w / 2);
+  const part = ry < .3 ? 'head' : ry > .72 ? 'foot' : rx > .55 ? 'hand' : 'body';
+  if (hits % 3 === 1 || texts.length === 0) { const arr = CHANTS[part]; texts.push({ s: arr[(Math.random() * arr.length) | 0], t: 1.6, y: 70 }); }
+  if (combo >= 5 && combo % 5 === 0) texts.push({ s: `連打 ${combo} 下！`, t: 1, y: 112, small: true, col: '#ffd166' });
+  setBar(hits / MAX_HITS);
+  if (hits >= MAX_HITS) shatter();
+}
+function shatter() {
+  sRip(); sGong(); vib([40, 50, 80]); shake = 1;
+  for (let i = 0; i < 16; i++) shards.push({ x: FIG.x + (Math.random() - .5) * FIG.w, y: FIG.y + (Math.random() - .5) * FIG.h, vx: (Math.random() - .5) * 360, vy: -150 - Math.random() * 250, r: Math.random() * 6, vr: (Math.random() - .5) * 10, s: 14 + Math.random() * 18, land: 380 + Math.random() * 40 });
+  texts.push({ s: '小人打散了！', t: 1.6, y: 112, col: '#ffd166' });
+  setTimeout(() => { tiger = { mouth: 0, eat: 0, fed: 0, pork: 1 }; setStep('tiger', '祭白虎：點肥豬肉餵白虎，讓牠吃飽不咬人'); setBar(0); }, 1500);
+}
+function feedTiger() {
+  if (!tiger || tiger.pork < 1) return;
+  tiger.pork = 0; tiger.flyT = 0; noise(.1, .2, 800);
+}
+function sprinkle(x, y) {
+  sRice(); riceN++;
+  for (let i = 0; i < 26; i++) parts.push({ x: x, y: y, vx: (Math.random() - .5) * 320, vy: -60 - Math.random() * 260, t: 1.4, c: '#fffaf0', r: 1.6, g: 700, rice: true, land: 360 + Math.random() * 80 });
+  setBar(riceN / 3);
+  if (riceN >= 3) { setStep('', '撒米驅邪完成'); setTimeout(() => { setStep('burn', '化寶：點一下把紙人碎片燒掉'); setBar(0); }, 900); }
+}
+function burn() { burnT = .001; sFire(); }
+function finish() {
+  const hitsUsed = hits, secs = Math.max(1, Math.round(burnStart - startT));
+  total++; try { localStorage.setItem('xiaorenTotal', total); } catch (e) {}
+  document.getElementById('total').textContent = total;
+  const fw = document.getElementById('fWho'); fw.textContent = me ? `${me} 的好運籤` : '好 運 籤'; fw.style.letterSpacing = me ? '2px' : '6px';
+  document.getElementById('fText').innerHTML = FORTUNES[(Math.random() * FORTUNES.length) | 0].replace('\n', '<br>');
+  document.getElementById('fStat').textContent = `這次拍了 ${hitsUsed} 下・花了 ${secs} 秒・累計打走 ${total} 個小人`;
+  setStep('done', '好運籤到手！'); setBar(1); sGong();
+  document.getElementById('fortune').hidden = false;
+}
+let burnStart = 0;
+
+/* 更新 */
+const smoke = [];
+function update(dt) {
+  time += dt; squash = Math.max(0, squash - dt * 6); shake = Math.max(0, shake - dt * 2.5);
+  slaps.forEach(s => s.t -= dt); slaps = slaps.filter(s => s.t > 0);
+  texts.forEach(s => s.t -= dt); texts = texts.filter(s => s.t > 0);
+  parts.forEach(p => { p.vy += p.g * dt; p.x += p.vx * dt; p.y += p.vy * dt; p.t -= dt; if (p.land && p.y > p.land) { p.y = p.land; p.vx = 0; p.vy = 0; p.g = 0; p.t = Math.max(p.t, 2); } });
+  parts = parts.filter(p => p.t > 0);
+  shards.forEach(s => { if (s.y < s.land) { s.vy += 700 * dt; s.x += s.vx * dt; s.y += s.vy * dt; s.r += s.vr * dt; } else { s.y = s.land; s.vx *= .8; } s.x = Math.max(40, Math.min(360, s.x)); });
+  // 香煙
+  if (Math.random() < dt * 8) smoke.push({ x: 185 + Math.random() * 30, y: 436, t: 3, r: 4 });
+  smoke.forEach(s => { s.t -= dt; s.y -= 22 * dt; s.x += Math.sin(time * 2 + s.y / 20) * 10 * dt; s.r += 6 * dt; });
+  while (smoke.length && smoke[0].t <= 0) smoke.shift();
+  if (tiger) {
+    tiger.mouth = Math.max(0, tiger.mouth - dt * 2);
+    if (tiger.flyT !== undefined) {
+      tiger.flyT += dt;
+      if (tiger.flyT > .5 && !tiger.ate) { tiger.ate = true; tiger.eat = 1.2; tone(140, .3, 'sawtooth', .06, 80); texts.push({ s: '白虎吃飽了，不再出來咬人', t: 1.8, y: 112, col: '#ffd166' }); setBar(1);
+        setTimeout(() => { tiger.leave = 0; setStep('rice', '撒米：點畫面撒米驅邪（3 次）'); setBar(0); }, 1600); }
+    }
+    if (tiger.eat > 0) tiger.eat -= dt;
+    if (tiger.leave !== undefined) { tiger.leave += dt; if (tiger.leave > 1) tiger = null; }
+  }
+  if (burnT > 0) {
+    if (burnT === .001) burnStart = time;
+    burnT += dt;
+    for (let i = 0; i < 6; i++) parts.push({ x: 120 + Math.random() * 160, y: 400 - Math.random() * 20, vx: (Math.random() - .5) * 40, vy: -80 - Math.random() * 120, t: .7 + Math.random() * .5, c: Math.random() < .5 ? '#ff7b00' : '#ffd000', r: 3 + Math.random() * 5, g: -40, fire: true });
+    if (burnT > .8) shards.forEach(s => s.s *= (1 - dt * 1.5));
+    if (Math.random() < .3) parts.push({ x: 140 + Math.random() * 120, y: 380, vx: (Math.random() - .5) * 30, vy: -60, t: 2, c: '#555', r: 2, g: -10 });
+    setBar(Math.min(1, burnT / 2.2));
+    if (burnT > 2.2) { burnT = -1; shards = []; finish(); }
+  }
+}
+
+/* 繪圖 */
+function drawFigure() {
+  ctx.save();
+  ctx.translate(FIG.x, FIG.y + 40); ctx.rotate(tilt * (1 - squash) * 0 + tilt); ctx.scale(1 + squash * .12, 1 - squash * .15); ctx.translate(0, -40);
+  const { w, h } = FIG, dmg = hits / MAX_HITS;
+  // 紙
+  ctx.fillStyle = 'rgba(0,0,0,.35)'; ctx.fillRect(-w / 2 + 5, -h / 2 + 6, w, h);
+  ctx.fillStyle = `hsl(45,${60 - dmg * 25}%,${86 - dmg * 12}%)`;
+  ctx.beginPath(); ctx.moveTo(-w / 2, -h / 2);
+  for (let i = 0; i <= 8; i++) ctx.lineTo(-w / 2 + w * i / 8, -h / 2 + (i % 2 ? dmg * 4 : 0));
+  for (let i = 0; i <= 10; i++) ctx.lineTo(w / 2 - (i % 2 ? dmg * 5 : 0), -h / 2 + h * i / 10);
+  for (let i = 8; i >= 0; i--) ctx.lineTo(-w / 2 + w * i / 8, h / 2 - (i % 2 ? dmg * 4 : 0));
+  for (let i = 10; i >= 0; i--) ctx.lineTo(-w / 2 + (i % 2 ? dmg * 5 : 0), -h / 2 + h * i / 10);
+  ctx.fill();
+  // 小人圖樣
+  ctx.strokeStyle = '#b5121b'; ctx.lineWidth = 3; ctx.lineCap = 'round';
+  ctx.beginPath(); ctx.arc(0, -h / 2 + 26, 15, 0, 7); ctx.stroke();
+  ctx.beginPath(); ctx.moveTo(0, -h / 2 + 41); ctx.lineTo(0, h / 2 - 48);
+  ctx.moveTo(-32, -h / 2 + 58); ctx.lineTo(32, -h / 2 + 58);
+  ctx.moveTo(0, h / 2 - 48); ctx.lineTo(-22, h / 2 - 14); ctx.moveTo(0, h / 2 - 48); ctx.lineTo(22, h / 2 - 14); ctx.stroke();
+  // 被打的表情
+  ctx.lineWidth = 2;
+  if (hits > 0) { ctx.beginPath(); ctx.moveTo(-8, -h / 2 + 20); ctx.lineTo(-3, -h / 2 + 25); ctx.moveTo(-3, -h / 2 + 20); ctx.lineTo(-8, -h / 2 + 25); ctx.moveTo(3, -h / 2 + 20); ctx.lineTo(8, -h / 2 + 25); ctx.moveTo(8, -h / 2 + 20); ctx.lineTo(3, -h / 2 + 25); ctx.stroke();
+    ctx.beginPath(); ctx.arc(0, -h / 2 + 34, 4, Math.PI, 0); ctx.stroke(); }
+  else { ctx.fillStyle = '#b5121b'; ctx.beginPath(); ctx.arc(-5, -h / 2 + 23, 2, 0, 7); ctx.arc(5, -h / 2 + 23, 2, 0, 7); ctx.fill(); ctx.beginPath(); ctx.arc(0, -h / 2 + 28, 5, .2, Math.PI - .2); ctx.stroke(); }
+  // 名字（直書）
+  ctx.fillStyle = '#1a1a1a'; ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
+  const chars = [...label].slice(0, 8), fs = chars.length > 5 ? 12 : 15;
+  ctx.font = `900 ${fs}px "PingFang TC","Noto Sans TC",serif`;
+  chars.forEach((c, i) => ctx.fillText(c, w / 2 - 14, -h / 2 + 50 + i * (fs + 2)));
+  // 皺摺
+  ctx.strokeStyle = 'rgba(90,60,20,.35)'; ctx.lineWidth = 1.2;
+  for (const k of wrinkles) { ctx.beginPath(); ctx.moveTo(k.x - Math.cos(k.a) * k.l / 2, k.y - Math.sin(k.a) * k.l / 2); ctx.lineTo(k.x + Math.cos(k.a + .3) * k.l / 2, k.y + Math.sin(k.a + .3) * k.l / 2); ctx.stroke(); }
+  // 破洞
+  ctx.fillStyle = '#7d7672';
+  for (const t of tears) { ctx.beginPath(); ctx.moveTo(t.x, t.y - t.l / 2); ctx.lineTo(t.x - Math.sign(t.x) * t.l * .5, t.y); ctx.lineTo(t.x, t.y + t.l / 2); ctx.closePath(); ctx.fill(); }
+  ctx.restore();
+}
+function drawSlipper(s) {
+  const k = s.t / .3, a = k > .6 ? (k - .6) / .4 * 1.1 : 0;
+  ctx.save(); ctx.globalAlpha = Math.min(1, k * 3); ctx.translate(s.x, s.y); ctx.rotate(-.5 - a); ctx.scale(1, 1 - a * .3);
+  ctx.fillStyle = '#e9edc9'; ctx.beginPath(); ctx.ellipse(0, 0, 22, 46, 0, 0, 7); ctx.fill();
+  ctx.fillStyle = '#2a9d8f'; ctx.beginPath(); ctx.ellipse(0, 0, 18, 42, 0, 0, 7); ctx.fill();
+  ctx.strokeStyle = '#1d3557'; ctx.lineWidth = 7; ctx.beginPath(); ctx.moveTo(-17, -18); ctx.quadraticCurveTo(0, -4, 17, -18); ctx.stroke();
+  ctx.restore();
+}
+function drawTiger() {
+  const tg = tiger, lv = tg.leave !== undefined ? tg.leave : 0;
+  ctx.save(); ctx.globalAlpha = 1 - lv; ctx.translate(200, 190 - lv * 40);
+  const chew = tg.eat > 0 ? Math.abs(Math.sin(time * 14)) * 8 : 0;
+  // 紙白虎（頭）
+  ctx.fillStyle = '#fffaf0'; ctx.strokeStyle = '#222'; ctx.lineWidth = 2.5;
+  for (const s of [-1, 1]) { ctx.beginPath(); ctx.arc(s * 46, -54, 18, 0, 7); ctx.fill(); ctx.stroke(); }
+  ctx.beginPath(); ctx.ellipse(0, 0, 76, 66, 0, 0, 7); ctx.fill(); ctx.stroke();
+  ctx.fillStyle = '#222';
+  for (const s of [-1, 1]) for (let i = 0; i < 3; i++) { ctx.beginPath(); ctx.moveTo(s * 76, -16 + i * 16); ctx.lineTo(s * 54, -12 + i * 16); ctx.lineTo(s * 76, -8 + i * 16); ctx.fill(); }
+  ctx.fillRect(-4, -60, 8, 18); ctx.fillRect(-14, -58, 6, 12); ctx.fillRect(8, -58, 6, 12);  // 王字紋
+  ctx.fillRect(-16, -50, 32, 3);
+  // 眼睛
+  ctx.fillStyle = '#ffd166'; for (const s of [-1, 1]) { ctx.beginPath(); ctx.ellipse(s * 26, -14, 13, 10, s * .2, 0, 7); ctx.fill(); ctx.stroke(); }
+  ctx.fillStyle = '#111'; ctx.beginPath(); ctx.ellipse(-26, -14, 3, 8, 0, 0, 7); ctx.ellipse(26, -14, 3, 8, 0, 0, 7); ctx.fill();
+  // 鼻、嘴
+  ctx.fillStyle = '#e5989b'; ctx.beginPath(); ctx.moveTo(-10, 6); ctx.lineTo(10, 6); ctx.lineTo(0, 16); ctx.fill();
+  const open = (tg.pork === 0 && !tg.ate) ? 22 : 6 + chew;
+  ctx.fillStyle = '#7a1f10'; ctx.beginPath(); ctx.ellipse(0, 34, 26, open, 0, 0, 7); ctx.fill(); ctx.stroke();
+  ctx.fillStyle = '#fff'; ctx.beginPath(); ctx.moveTo(-18, 34 - open + 2); ctx.lineTo(-12, 34 - open + 12); ctx.lineTo(-6, 34 - open + 2); ctx.moveTo(18, 34 - open + 2); ctx.lineTo(12, 34 - open + 12); ctx.lineTo(6, 34 - open + 2); ctx.fill();
+  ctx.fillStyle = '#c1121f'; ctx.font = '900 14px serif'; ctx.textAlign = 'center'; ctx.fillText('白虎', 0, 84);
+  ctx.restore();
+  // 肥豬肉
+  let px = 200, py = 420;
+  if (tg.pork === 0 && !tg.ate) { const k = Math.min(1, tg.flyT / .5); px = 200; py = 420 - k * 196 - Math.sin(k * Math.PI) * 60; }
+  if (tg.pork === 1 || !tg.ate) {
+    const bob = tg.pork === 1 ? Math.sin(time * 4) * 3 : 0;
+    ctx.save(); ctx.translate(px, py + bob);
+    ctx.fillStyle = '#f8edeb'; ctx.beginPath(); ctx.roundRect(-30, -12, 60, 24, 6); ctx.fill();
+    ctx.fillStyle = '#e5989b'; ctx.fillRect(-30, -2, 60, 6); ctx.fillStyle = '#c9184a'; ctx.fillRect(-30, 6, 60, 4);
+    ctx.restore();
+    if (tg.pork === 1) { ctx.fillStyle = '#ffd166'; ctx.font = '700 13px system-ui'; ctx.textAlign = 'center'; ctx.fillText('👆 點肥豬肉', 200, 456); }
+  }
+}
+function draw() {
+  ctx.setTransform(scale, 0, 0, scale, 0, 0);
+  if (shake > 0) ctx.translate((Math.random() - .5) * shake * 12, (Math.random() - .5) * shake * 12);
+  ctx.drawImage(bg, 0, 0, W, H);
+  // 燈籠
+  for (const [x, ph] of [[96, 0], [304, 1.3]]) {
+    const sw = Math.sin(time * 1.4 + ph) * .08;
+    ctx.save(); ctx.translate(x, 36); ctx.rotate(sw);
+    ctx.strokeStyle = '#d4a017'; ctx.lineWidth = 2; ctx.beginPath(); ctx.moveTo(0, 0); ctx.lineTo(0, 16); ctx.stroke();
+    ctx.shadowColor = '#ff4d2e'; ctx.shadowBlur = 22; ctx.fillStyle = '#e63946'; ctx.beginPath(); ctx.ellipse(0, 42, 26, 28, 0, 0, 7); ctx.fill(); ctx.shadowBlur = 0;
+    ctx.fillStyle = '#d4a017'; ctx.fillRect(-12, 14, 24, 5); ctx.fillRect(-12, 66, 24, 5);
+    ctx.strokeStyle = '#b5121b'; ctx.lineWidth = 1; for (const k of [-14, 0, 14]) { ctx.beginPath(); ctx.ellipse(0, 42, Math.abs(k) * .9 + 2, 27, 0, 0, 7); ctx.stroke(); }
+    ctx.fillStyle = '#ffd166'; ctx.font = '900 16px serif'; ctx.textAlign = 'center'; ctx.textBaseline = 'middle'; ctx.fillText('福', 0, 43);
+    ctx.strokeStyle = '#d4a017'; ctx.beginPath(); ctx.moveTo(0, 71); ctx.lineTo(0, 86); ctx.stroke();
+    ctx.restore();
+  }
+  // 香煙
+  for (const s of smoke) { ctx.fillStyle = `rgba(220,220,220,${s.t / 3 * .22})`; ctx.beginPath(); ctx.arc(s.x, s.y, s.r, 0, 7); ctx.fill(); }
+  if (phase === 'beat' || phase === 'write') drawFigure();
+  // 碎片
+  for (const s of shards) { if (s.s < 1) continue; ctx.save(); ctx.translate(s.x, s.y); ctx.rotate(s.r); ctx.fillStyle = burnT > 0 ? '#3a2a1a' : '#f2e2b0'; ctx.strokeStyle = '#b5121b44'; ctx.beginPath(); ctx.moveTo(-s.s / 2, -s.s / 3); ctx.lineTo(s.s / 2, -s.s / 2); ctx.lineTo(s.s / 3, s.s / 2); ctx.lineTo(-s.s / 2, s.s / 3); ctx.closePath(); ctx.fill(); ctx.stroke(); ctx.restore(); }
+  if (tiger) drawTiger();
+  for (const p of parts) { ctx.globalAlpha = Math.min(1, p.t * (p.fire ? 2 : 1.5)); ctx.fillStyle = p.c; ctx.beginPath(); if (p.rice) ctx.ellipse(p.x, p.y, 2.4, 1.3, p.x, 0, 7); else ctx.arc(p.x, p.y, p.r, 0, 7); ctx.fill(); }
+  ctx.globalAlpha = 1;
+  slaps.forEach(drawSlipper);
+  for (const tx of texts) {
+    ctx.globalAlpha = Math.min(1, tx.t * 2); ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
+    ctx.font = `900 ${tx.small ? 16 : 20}px "PingFang TC","Noto Sans TC",serif`;
+    ctx.lineWidth = 5; ctx.strokeStyle = '#3a0905'; ctx.strokeText(tx.s, 200, tx.y + 70);
+    ctx.fillStyle = tx.col || '#fff1d6'; ctx.fillText(tx.s, 200, tx.y + 70); ctx.globalAlpha = 1;
+  }
+  if (phase === 'burn' && burnT === 0) { ctx.fillStyle = '#ffd166'; ctx.font = '700 15px system-ui'; ctx.textAlign = 'center'; ctx.fillText('🔥 點一下化寶', 200, 350); }
+}
+
+let last = performance.now();
+function loop(now) { const dt = Math.min(.033, (now - last) / 1000); last = now; update(dt); draw(); requestAnimationFrame(loop); }
+resize(); setStep('write', ''); requestAnimationFrame(loop);
+window.__xr = { get phase() { return phase; }, get hits() { return hits; }, get tiger() { return tiger; } };
+})();
+</script>
+</body>
+</html>

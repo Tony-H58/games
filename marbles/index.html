@@ -1,0 +1,396 @@
+<!DOCTYPE html>
+<html lang="zh-Hant">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1,maximum-scale=1,user-scalable=no">
+<title>彈彈珠</title>
+<style>
+  html,body{margin:0;height:100%;background:#2a1d14;color:#f6efe4;font-family:system-ui,-apple-system,"PingFang TC","Noto Sans TC",sans-serif;overflow:hidden;touch-action:none;user-select:none;-webkit-user-select:none}
+  #top{max-width:520px;margin:0 auto;padding:8px 10px 4px}
+  #players{display:flex;gap:8px}
+  .pl{flex:1;background:#00000040;border:2px solid transparent;border-radius:12px;padding:6px 10px;transition:border-color .2s}
+  .pl.on{border-color:#ffd166;background:#ffd16622}
+  .pl .nm{font-size:13px;opacity:.85;display:flex;align-items:center;gap:6px}
+  .pl .nm i{width:12px;height:12px;border-radius:50%;display:inline-block}
+  .pl b{font-size:24px;font-variant-numeric:tabular-nums}
+  .pl .dots{display:flex;flex-wrap:wrap;gap:3px;min-height:10px;margin-top:2px}
+  .pl .dots span{width:9px;height:9px;border-radius:50%}
+  #msg{text-align:center;font-size:14px;height:20px;margin-top:5px;color:#ffd166}
+  #wrap{position:relative;display:flex;justify-content:center}
+  canvas{display:block;touch-action:none;border-radius:12px}
+  .ov{position:absolute;inset:0;display:flex;align-items:center;justify-content:center}
+  .box{background:#1b120cee;border:1px solid #ffffff22;border-radius:16px;padding:20px;width:min(300px,82%);text-align:center}
+  .box h2{margin:0 0 6px;font-size:28px;color:#ffd166}
+  .box p{font-size:13px;opacity:.8;line-height:1.6;margin:6px 0 14px}
+  .seg{display:flex;border:1px solid #ffffff33;border-radius:10px;overflow:hidden;margin-bottom:10px}
+  .seg button{flex:1;background:none;border:0;color:#f6efe4;padding:10px 4px;font-size:15px}
+  .seg button.on{background:#ffd166;color:#2a1d14;font-weight:700}
+  .go{width:100%;background:#ef476f;color:#fff;border:0;border-radius:10px;padding:13px;font-size:17px;font-weight:700}
+  .lbl{font-size:12px;opacity:.7;text-align:left;margin:4px 0}
+  [hidden]{display:none!important}
+</style>
+</head>
+<body>
+<div id="top">
+  <div id="players">
+    <div class="pl" id="p0"><div class="nm"><i style="background:#3a86ff"></i><span>你</span></div><b>0</b><div class="dots"></div></div>
+    <div class="pl" id="p1"><div class="nm"><i style="background:#ef476f"></i><span>電腦</span></div><b>0</b><div class="dots"></div></div>
+  </div>
+  <div id="msg"></div>
+</div>
+<div id="wrap">
+  <canvas id="c"></canvas>
+  <div class="ov" id="menu">
+    <div class="box">
+      <h2>彈彈珠</h2>
+      <p>手指在畫面上<b>往後拉</b>瞄準，放開彈出母珠。<br>把圈內的珠子打出圈外就歸你，打到就能再打一次！</p>
+      <div class="lbl">對手</div>
+      <div class="seg" id="mMode"><button data-v="ai" class="on">電腦</button><button data-v="pvp">雙人輪流</button></div>
+      <div class="lbl">圈內珠子</div>
+      <div class="seg" id="mNum"><button data-v="5">5</button><button data-v="7" class="on">7</button><button data-v="11">11</button><button data-v="15">15</button></div>
+      <button class="go" id="start">開始</button>
+    </div>
+  </div>
+  <div class="ov" id="over" hidden>
+    <div class="box"><h2 id="oTitle"></h2><p id="oSub"></p><button class="go" id="again">再玩一局</button></div>
+  </div>
+</div>
+<script>
+(() => {
+const W = 400, H = 620, C = { x: 200, y: 285 }, R = 140, START = { x: 200, y: 545 };
+const MAXPULL = 130, MAXV = 1050, DEC = 240;
+const cv = document.getElementById('c'), ctx = cv.getContext('2d');
+let scale = 1, cssScale = 1;
+function resize() {
+  const top = document.getElementById('top').offsetHeight;
+  const s = Math.min((innerWidth - 12) / W, (innerHeight - top - 10) / H);
+  const d = window.devicePixelRatio || 1;
+  cssScale = s;
+  cv.style.width = W * s + 'px'; cv.style.height = H * s + 'px';
+  cv.width = Math.round(W * s * d); cv.height = Math.round(H * s * d); scale = s * d;
+}
+addEventListener('resize', resize); resize();
+
+/* 地面材質 */
+const ground = document.createElement('canvas'); ground.width = W; ground.height = H;
+(() => {
+  const g = ground.getContext('2d');
+  const gr = g.createRadialGradient(W / 2, H / 2, 50, W / 2, H / 2, 420);
+  gr.addColorStop(0, '#a87b52'); gr.addColorStop(1, '#6e4a2c');
+  g.fillStyle = gr; g.fillRect(0, 0, W, H);
+  for (let i = 0; i < 2600; i++) {
+    const x = Math.random() * W, y = Math.random() * H, r = Math.random() * 1.6 + .3;
+    g.fillStyle = Math.random() < .5 ? `rgba(60,38,20,${Math.random() * .35})` : `rgba(230,200,160,${Math.random() * .25})`;
+    g.beginPath(); g.arc(x, y, r, 0, Math.PI * 2); g.fill();
+  }
+  for (let i = 0; i < 26; i++) { // 小石子
+    const x = Math.random() * W, y = Math.random() * H;
+    if (Math.hypot(x - C.x, y - C.y) < R + 10) continue;
+    g.fillStyle = `rgba(${150 + Math.random() * 60},${130 + Math.random() * 40},110,.7)`;
+    g.beginPath(); g.ellipse(x, y, 2 + Math.random() * 3, 1.5 + Math.random() * 2, Math.random() * 3, 0, Math.PI * 2); g.fill();
+  }
+  // 粉筆圈
+  g.strokeStyle = 'rgba(255,255,255,.75)'; g.lineWidth = 3; g.setLineDash([]);
+  g.beginPath();
+  for (let i = 0; i <= 120; i++) { const a = i / 120 * Math.PI * 2, rr = R + Math.sin(i * 1.7) * .8; g.lineTo(C.x + Math.cos(a) * rr, C.y + Math.sin(a) * rr); }
+  g.stroke();
+  g.strokeStyle = 'rgba(255,255,255,.18)'; g.lineWidth = 7; g.stroke();
+  // 起手線
+  g.strokeStyle = 'rgba(255,255,255,.6)'; g.lineWidth = 2.5;
+  g.beginPath(); g.moveTo(START.x - 60, START.y + 22); g.lineTo(START.x + 60, START.y + 22); g.stroke();
+})();
+
+/* 音效 */
+let ac = null, lastClick = 0;
+function initAudio() { if (!ac) { try { ac = new (window.AudioContext || window.webkitAudioContext)(); } catch (e) {} } else if (ac.state === 'suspended') ac.resume(); }
+function click(vol) {
+  if (!ac || performance.now() - lastClick < 25) return; lastClick = performance.now();
+  const t = ac.currentTime, o = ac.createOscillator(), g = ac.createGain();
+  o.type = 'sine'; o.frequency.setValueAtTime(2400 + Math.random() * 900, t); o.frequency.exponentialRampToValueAtTime(1400, t + .05);
+  g.gain.setValueAtTime(Math.min(.25, vol), t); g.gain.exponentialRampToValueAtTime(.0001, t + .07);
+  o.connect(g).connect(ac.destination); o.start(t); o.stop(t + .08);
+}
+function chime() {
+  if (!ac) return; [880, 1320].forEach((f, i) => {
+    const t = ac.currentTime + i * .09, o = ac.createOscillator(), g = ac.createGain();
+    o.frequency.value = f; g.gain.setValueAtTime(.08, t); g.gain.exponentialRampToValueAtTime(.0001, t + .25);
+    o.connect(g).connect(ac.destination); o.start(t); o.stop(t + .3);
+  });
+}
+
+/* 狀態 */
+const COLORS = ['#06d6a0', '#ffd166', '#8338ec', '#fb5607', '#00b4d8', '#ff006e', '#a7c957', '#f4a261', '#e9c46a', '#90e0ef', '#c77dff', '#ff8fab', '#80ed99', '#ffb703', '#4cc9f0'];
+const PCOL = ['#3a86ff', '#ef476f'];
+let balls = [], shooters = [], mode = 'ai', nMarbles = 7, turn = 0, phase = 'menu', caps = [[], []];
+let drag = null, aimV = null, aiTimer = 0, aiPlan = null, msgTimer = 0, shotCaptured = 0, firstShot = [true, true];
+const isAI = () => mode === 'ai' && turn === 1;
+
+function setMsg(t) { document.getElementById('msg').textContent = t; }
+function startGame() {
+  balls = []; caps = [[], []]; turn = 0; firstShot = [true, true];
+  const cols = COLORS.slice().sort(() => Math.random() - .5);
+  let tries = 0;
+  while (balls.length < nMarbles && tries++ < 5000) {
+    const a = Math.random() * Math.PI * 2, rr = Math.sqrt(Math.random()) * (nMarbles > 9 ? 85 : 70);
+    const x = C.x + Math.cos(a) * rr, y = C.y + Math.sin(a) * rr;
+    if (balls.every(b => Math.hypot(b.x - x, b.y - y) > 24)) balls.push(mk(x, y, 10, cols[balls.length % cols.length], 'marble'));
+  }
+  shooters = [mk(START.x, START.y, 13, PCOL[0], 'shooter'), mk(START.x, START.y, 13, PCOL[1], 'shooter')];
+  shooters.forEach((s, i) => { s.owner = i; s.placed = false; });
+  balls.push(...shooters);
+  document.getElementById('menu').hidden = true; document.getElementById('over').hidden = true;
+  document.querySelector('#p1 .nm span').textContent = mode === 'ai' ? '電腦' : '玩家 2';
+  document.querySelector('#p0 .nm span').textContent = mode === 'ai' ? '你' : '玩家 1';
+  beginTurn();
+}
+function mk(x, y, r, color, kind) { return { x, y, vx: 0, vy: 0, r, m: r * r, color, kind, gone: false, fade: 1, spin: Math.random() * 6, placed: true }; }
+const active = () => balls.filter(b => !b.gone && b.placed);
+const marblesLeft = () => balls.filter(b => b.kind === 'marble' && !b.gone);
+
+function beginTurn() {
+  const s = shooters[turn];
+  if (!s.placed) {
+    s.placed = true; s.x = START.x; s.y = START.y; s.vx = s.vy = 0;
+    let k = 0; while (active().some(b => b !== s && Math.hypot(b.x - s.x, b.y - s.y) < b.r + s.r + 2) && k < 20) { k++; s.x = START.x + (k % 2 ? 1 : -1) * Math.ceil(k / 2) * 30; }
+  }
+  updateHud();
+  if (isAI()) { phase = 'ai'; aiPlan = planAI(); aiTimer = 0; setMsg('電腦瞄準中…'); }
+  else { phase = 'aim'; setMsg((mode === 'ai' ? '輪到你' : `輪到玩家 ${turn + 1}`) + '：往後拉瞄準，放開發射'); }
+}
+function updateHud() {
+  [0, 1].forEach(i => {
+    const el = document.getElementById('p' + i);
+    el.classList.toggle('on', i === turn && phase !== 'over');
+    el.querySelector('b').textContent = caps[i].length;
+    el.querySelector('.dots').innerHTML = caps[i].map(c => `<span style="background:${c}"></span>`).join('');
+  });
+}
+
+function shoot(vx, vy) {
+  const s = shooters[turn]; s.vx = vx; s.vy = vy; phase = 'moving'; shotCaptured = 0; firstShot[turn] = false;
+  balls.forEach(b => { if (b.kind === 'marble' && !b.gone) b.wasIn = true; });
+  click(.12);
+}
+
+/* 物理 */
+function step(dt) {
+  const arr = active();
+  for (const b of arr) {
+    const sp = Math.hypot(b.vx, b.vy);
+    if (sp > 0) {
+      const ns = Math.max(0, sp - (DEC + sp * .35) * dt);
+      b.vx *= ns / sp; b.vy *= ns / sp;
+      if (ns < 4) b.vx = b.vy = 0;
+    }
+    b.x += b.vx * dt; b.y += b.vy * dt; b.spin += sp * dt / b.r;
+    if (b.x < b.r) { b.x = b.r; b.vx = Math.abs(b.vx) * .55; }
+    if (b.x > W - b.r) { b.x = W - b.r; b.vx = -Math.abs(b.vx) * .55; }
+    if (b.y < b.r) { b.y = b.r; b.vy = Math.abs(b.vy) * .55; }
+    if (b.y > H - b.r) { b.y = H - b.r; b.vy = -Math.abs(b.vy) * .55; }
+  }
+  for (let i = 0; i < arr.length; i++) for (let j = i + 1; j < arr.length; j++) {
+    const a = arr[i], b = arr[j];
+    const dx = b.x - a.x, dy = b.y - a.y, d = Math.hypot(dx, dy), mn = a.r + b.r;
+    if (d >= mn || d === 0) continue;
+    const nx = dx / d, ny = dy / d, ov = mn - d, tm = a.m + b.m;
+    a.x -= nx * ov * b.m / tm; a.y -= ny * ov * b.m / tm; b.x += nx * ov * a.m / tm; b.y += ny * ov * a.m / tm;
+    const vr = (a.vx - b.vx) * nx + (a.vy - b.vy) * ny;
+    if (vr > 0) {
+      const J = 1.93 * vr / (1 / a.m + 1 / b.m);
+      a.vx -= J / a.m * nx; a.vy -= J / a.m * ny; b.vx += J / b.m * nx; b.vy += J / b.m * ny;
+      click(vr / 2500);
+    }
+  }
+}
+function update(dt) {
+  balls.forEach(b => { if (b.gone && b.fade > 0) b.fade = Math.max(0, b.fade - dt * 2.5); });
+  if (phase === 'moving') {
+    for (let i = 0; i < 4; i++) step(dt / 4);
+    // 即時判定出圈
+    if (active().every(b => b.vx === 0 && b.vy === 0)) resolve();
+  } else if (phase === 'ai') {
+    aiTimer += dt;
+    if (aiTimer > 1.1 && aiPlan) { const p = aiPlan; aiPlan = null; shoot(p.vx, p.vy); }
+  }
+}
+function resolve() {
+  const out = balls.filter(b => b.kind === 'marble' && !b.gone && Math.hypot(b.x - C.x, b.y - C.y) > R);
+  out.forEach(b => { b.gone = true; caps[turn].push(b.color); });
+  if (out.length) chime();
+  const left = marblesLeft().length;
+  if (left === 0) return gameOver();
+  const who = mode === 'ai' ? (turn === 0 ? '你' : '電腦') : `玩家 ${turn + 1}`;
+  if (out.length) { setMsg(`${who}打出 ${out.length} 顆！再打一次`); updateHud(); setTimeout(() => { if (phase !== 'over') beginTurn(); }, 700); phase = 'wait'; }
+  else { turn = 1 - turn; phase = 'wait'; updateHud(); setMsg(`${who}沒打出去，換人`); setTimeout(() => { if (phase !== 'over') beginTurn(); }, 800); }
+}
+function gameOver() {
+  phase = 'over'; updateHud(); setMsg('');
+  const a = caps[0].length, b = caps[1].length;
+  const names = mode === 'ai' ? ['你', '電腦'] : ['玩家 1', '玩家 2'];
+  document.getElementById('oTitle').textContent = a === b ? '平手！' : (mode === 'ai' ? (a > b ? '你贏了！🎉' : '電腦贏了') : `${a > b ? names[0] : names[1]} 獲勝！🎉`);
+  document.getElementById('oSub').textContent = `${names[0]} ${a} 顆 ： ${names[1]} ${b} 顆`;
+  setTimeout(() => document.getElementById('over').hidden = false, 600);
+}
+
+/* 射線預測：第一顆撞到的珠子 */
+function rayHit(s, ux, uy) {
+  let best = null, bt = 1e9;
+  for (const b of active()) {
+    if (b === s) continue;
+    const fx = s.x - b.x, fy = s.y - b.y, rr = s.r + b.r;
+    const bq = fx * ux + fy * uy, cq = fx * fx + fy * fy - rr * rr, disc = bq * bq - cq;
+    if (disc < 0) continue;
+    const t = -bq - Math.sqrt(disc);
+    if (t > 0 && t < bt) { bt = t; best = b; }
+  }
+  return best ? { b: best, t: bt } : null;
+}
+
+/* 電腦 AI */
+function planAI() {
+  const s = shooters[turn];
+  let best = null;
+  for (const m of marblesLeft()) {
+    let ux = m.x - C.x, uy = m.y - C.y, ul = Math.hypot(ux, uy);
+    if (ul < 1) { ux = m.x - s.x; uy = m.y - s.y; ul = Math.hypot(ux, uy); }
+    ux /= ul; uy /= ul;
+    // 也考慮直接沿射手方向推
+    const dirs = [[ux, uy]];
+    const dx0 = m.x - s.x, dy0 = m.y - s.y, dl0 = Math.hypot(dx0, dy0); dirs.push([dx0 / dl0, dy0 / dl0]);
+    for (const [px, py] of dirs) {
+      const gx = m.x - px * (s.r + m.r), gy = m.y - py * (s.r + m.r);
+      const ax = gx - s.x, ay = gy - s.y, al = Math.hypot(ax, ay);
+      if (al < 1) continue;
+      const cos = (ax * px + ay * py) / al;
+      if (cos < .35) continue;
+      const hit = rayHit(s, ax / al, ay / al);
+      if (!hit || hit.b !== m) continue;
+      // 珠子要被推到圈外的距離
+      let t = 0; const mx = m.x, my = m.y;
+      while (Math.hypot(mx + px * t - C.x, my + py * t - C.y) < R + 14 && t < 400) t += 4;
+      const score = cos * 2 - t / 200 - al / 600;
+      if (!best || score > best.score) best = { score, ax: ax / al, ay: ay / al, al, push: t, cos };
+    }
+  }
+  let vx, vy;
+  if (best) {
+    const need = Math.sqrt(2 * DEC * (best.push * 1.9 / Math.max(best.cos, .5) + best.al * .6)) + 120;
+    const v = Math.min(MAXV, need * (0.95 + Math.random() * .2));
+    const err = (Math.random() - .5) * .07, c = Math.cos(err), sn = Math.sin(err);
+    vx = (best.ax * c - best.ay * sn) * v; vy = (best.ax * sn + best.ay * c) * v;
+  } else {
+    const m = marblesLeft()[0]; const dx = m.x - s.x, dy = m.y - s.y, dl = Math.hypot(dx, dy);
+    vx = dx / dl * MAXV * .8; vy = dy / dl * MAXV * .8;
+  }
+  return { vx, vy };
+}
+
+/* 操作 */
+function toLocal(e) { const r = cv.getBoundingClientRect(); return { x: (e.clientX - r.left) / r.width * W, y: (e.clientY - r.top) / r.height * H }; }
+cv.addEventListener('pointerdown', e => {
+  initAudio();
+  if (phase !== 'aim') return;
+  cv.setPointerCapture(e.pointerId);
+  drag = { sx: e.clientX, sy: e.clientY }; aimV = null;
+});
+cv.addEventListener('pointermove', e => {
+  if (!drag || phase !== 'aim') return;
+  const k = 1 / cssScale;
+  let px = (drag.sx - e.clientX) * k, py = (drag.sy - e.clientY) * k, l = Math.hypot(px, py);
+  if (l < 6) { aimV = null; return; }
+  const p = Math.min(l, MAXPULL) / MAXPULL;
+  aimV = { ux: px / l, uy: py / l, p };
+});
+function release() {
+  if (!drag) return; drag = null;
+  if (phase === 'aim' && aimV && aimV.p > .06) { const v = aimV.p * MAXV; shoot(aimV.ux * v, aimV.uy * v); }
+  aimV = null;
+}
+cv.addEventListener('pointerup', release); cv.addEventListener('pointercancel', () => { drag = null; aimV = null; });
+
+function segBind(id, cb) {
+  document.getElementById(id).addEventListener('click', e => {
+    const b = e.target.closest('button'); if (!b) return;
+    [...document.getElementById(id).children].forEach(x => x.classList.toggle('on', x === b)); cb(b.dataset.v);
+  });
+}
+segBind('mMode', v => mode = v); segBind('mNum', v => nMarbles = +v);
+document.getElementById('start').addEventListener('click', () => { initAudio(); startGame(); });
+document.getElementById('again').addEventListener('click', () => { initAudio(); startGame(); });
+
+/* 繪圖 */
+function drawMarble(b) {
+  ctx.save(); ctx.globalAlpha = b.fade;
+  // 影子
+  ctx.fillStyle = 'rgba(30,15,5,.35)';
+  ctx.beginPath(); ctx.ellipse(b.x + b.r * .35, b.y + b.r * .45, b.r, b.r * .8, 0, 0, Math.PI * 2); ctx.fill();
+  // 玻璃本體
+  const g = ctx.createRadialGradient(b.x - b.r * .35, b.y - b.r * .35, b.r * .1, b.x, b.y, b.r);
+  g.addColorStop(0, 'rgba(255,255,255,.95)'); g.addColorStop(.25, b.color + 'cc'); g.addColorStop(1, b.color);
+  ctx.fillStyle = g; ctx.beginPath(); ctx.arc(b.x, b.y, b.r, 0, Math.PI * 2); ctx.fill();
+  // 內部花紋（貓眼）
+  ctx.beginPath(); ctx.arc(b.x, b.y, b.r - 1, 0, Math.PI * 2); ctx.clip();
+  ctx.strokeStyle = 'rgba(255,255,255,.55)'; ctx.lineWidth = b.r * .28;
+  ctx.beginPath();
+  const a = b.spin;
+  ctx.moveTo(b.x + Math.cos(a) * b.r, b.y + Math.sin(a) * b.r * .6);
+  ctx.quadraticCurveTo(b.x, b.y + Math.sin(a * 1.3) * b.r * .4, b.x - Math.cos(a) * b.r, b.y - Math.sin(a) * b.r * .6);
+  ctx.stroke();
+  ctx.restore();
+  ctx.save(); ctx.globalAlpha = b.fade;
+  ctx.fillStyle = 'rgba(255,255,255,.85)';
+  ctx.beginPath(); ctx.ellipse(b.x - b.r * .38, b.y - b.r * .42, b.r * .22, b.r * .14, -.6, 0, Math.PI * 2); ctx.fill();
+  if (b.kind === 'shooter') { ctx.strokeStyle = 'rgba(255,255,255,.7)'; ctx.lineWidth = 1.5; ctx.beginPath(); ctx.arc(b.x, b.y, b.r, 0, Math.PI * 2); ctx.stroke(); }
+  ctx.restore();
+}
+function drawAim(s, ux, uy, p, color) {
+  const hit = rayHit(s, ux, uy);
+  const len = hit ? Math.min(hit.t, 60 + p * 260) : 60 + p * 260;
+  ctx.save();
+  ctx.strokeStyle = color; ctx.lineWidth = 2; ctx.setLineDash([6, 6]);
+  ctx.beginPath(); ctx.moveTo(s.x, s.y); ctx.lineTo(s.x + ux * len, s.y + uy * len); ctx.stroke(); ctx.setLineDash([]);
+  if (hit && hit.t <= 60 + p * 260) {
+    const gx = s.x + ux * hit.t, gy = s.y + uy * hit.t;
+    ctx.strokeStyle = 'rgba(255,255,255,.7)'; ctx.beginPath(); ctx.arc(gx, gy, s.r, 0, Math.PI * 2); ctx.stroke();
+    // 目標珠子預計前進方向
+    const nx = hit.b.x - gx, ny = hit.b.y - gy, nl = Math.hypot(nx, ny);
+    ctx.strokeStyle = 'rgba(255,209,102,.8)'; ctx.beginPath(); ctx.moveTo(hit.b.x, hit.b.y); ctx.lineTo(hit.b.x + nx / nl * 40, hit.b.y + ny / nl * 40); ctx.stroke();
+  }
+  // 力道條
+  ctx.fillStyle = 'rgba(0,0,0,.4)'; ctx.fillRect(W / 2 - 80, H - 18, 160, 8);
+  ctx.fillStyle = p > .8 ? '#ef476f' : p > .5 ? '#ffd166' : '#06d6a0'; ctx.fillRect(W / 2 - 80, H - 18, 160 * p, 8);
+  ctx.restore();
+}
+function draw() {
+  ctx.setTransform(scale, 0, 0, scale, 0, 0);
+  ctx.drawImage(ground, 0, 0);
+  // 出圈但還沒結算的珠子微光
+  const arr = balls.filter(b => b.placed && (b.fade > 0));
+  arr.sort((a, b) => a.y - b.y).forEach(drawMarble);
+  // 目前射手標示
+  if (phase === 'aim' || phase === 'ai') {
+    const s = shooters[turn], t = performance.now() / 300;
+    ctx.strokeStyle = PCOL[turn]; ctx.lineWidth = 2; ctx.globalAlpha = .5 + .3 * Math.sin(t);
+    ctx.beginPath(); ctx.arc(s.x, s.y, s.r + 6, 0, Math.PI * 2); ctx.stroke(); ctx.globalAlpha = 1;
+  }
+  if (phase === 'aim' && aimV) drawAim(shooters[turn], aimV.ux, aimV.uy, aimV.p, '#fff');
+  if (phase === 'ai' && aiPlan && aiTimer > .3) {
+    const v = Math.hypot(aiPlan.vx, aiPlan.vy);
+    drawAim(shooters[1], aiPlan.vx / v, aiPlan.vy / v, Math.min(1, v / MAXV) * Math.min(1, (aiTimer - .3) / .6), '#ffb3c1');
+  }
+}
+
+let last = performance.now();
+function loop(t) {
+  const dt = Math.min(.033, (t - last) / 1000); last = t;
+  update(dt); draw(); requestAnimationFrame(loop);
+}
+// 選單背景先擺好珠子
+startGame(); phase = 'menu'; document.getElementById('menu').hidden = false; setMsg('');
+[0, 1].forEach(i => document.getElementById('p' + i).classList.remove('on'));
+requestAnimationFrame(loop);
+window.__mb = { get phase() { return phase; }, get turn() { return turn; }, get caps() { return caps; }, shoot, get balls() { return balls; }, update, startGame, setMode: v => mode = v, planAI, get shooters() { return shooters; } };
+})();
+</script>
+</body>
+</html>

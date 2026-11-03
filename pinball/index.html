@@ -1,0 +1,404 @@
+<!DOCTYPE html>
+<html lang="zh-Hant">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1,maximum-scale=1,user-scalable=no">
+<title>霓虹彈珠台</title>
+<style>
+  html,body{margin:0;height:100%;background:#07060f;color:#e8e6ff;font-family:system-ui,-apple-system,"PingFang TC","Noto Sans TC",sans-serif;overflow:hidden;touch-action:none;user-select:none;-webkit-user-select:none}
+  #hud{display:flex;justify-content:space-between;align-items:center;gap:8px;max-width:520px;margin:0 auto;padding:8px 12px 4px;font-size:14px}
+  #hud b{font-size:20px;color:#7ff;font-variant-numeric:tabular-nums;text-shadow:0 0 8px #0ff8}
+  #hud .lbl{opacity:.6;font-size:11px;display:block;line-height:1}
+  #mute{background:none;border:1px solid #fff3;color:#fff;border-radius:8px;padding:4px 8px;font-size:16px}
+  #wrap{display:flex;justify-content:center}
+  canvas{display:block;touch-action:none}
+</style>
+</head>
+<body>
+<div id="hud">
+  <div><span class="lbl">分數</span><b id="score">0</b></div>
+  <div><span class="lbl">球數</span><b id="balls">3</b></div>
+  <div><span class="lbl">倍數</span><b id="mult">x1</b></div>
+  <div><span class="lbl">最高分</span><b id="hi">0</b></div>
+  <button id="mute" aria-label="音效開關">🔊</button>
+</div>
+<div id="wrap"><canvas id="c"></canvas></div>
+<script>
+(() => {
+const W = 400, H = 720;
+const cv = document.getElementById('c'), ctx = cv.getContext('2d');
+let scale = 1;
+function resize() {
+  const hud = document.getElementById('hud').offsetHeight;
+  const s = Math.min(innerWidth / W, (innerHeight - hud - 6) / H);
+  const d = window.devicePixelRatio || 1;
+  cv.style.width = W * s + 'px'; cv.style.height = H * s + 'px';
+  cv.width = Math.round(W * s * d); cv.height = Math.round(H * s * d);
+  scale = s * d;
+}
+addEventListener('resize', resize); resize();
+
+/* ---------- 音效 ---------- */
+let ac = null, muted = false;
+function initAudio() { if (!ac) { try { ac = new (window.AudioContext || window.webkitAudioContext)(); } catch (e) {} } else if (ac.state === 'suspended') ac.resume(); }
+function beep(f, d = .08, type = 'square', v = .04) {
+  if (!ac || muted) return;
+  const t = ac.currentTime, o = ac.createOscillator(), g = ac.createGain();
+  o.type = type; o.frequency.setValueAtTime(f, t);
+  g.gain.setValueAtTime(v, t); g.gain.exponentialRampToValueAtTime(.0001, t + d);
+  o.connect(g).connect(ac.destination); o.start(t); o.stop(t + d);
+}
+document.getElementById('mute').addEventListener('pointerdown', e => {
+  e.stopPropagation(); muted = !muted; e.target.textContent = muted ? '🔇' : '🔊';
+});
+
+/* ---------- 台面 ---------- */
+const walls = [];
+function seg(x1, y1, x2, y2, o = {}) { const s = { x1, y1, x2, y2, e: .5, kick: 0, active: true, flash: 0, ...o }; walls.push(s); return s; }
+const ARC = { x: 200, y: 195, r: 180 };
+const arcPts = [];
+for (let i = 0; i <= 28; i++) { const a = Math.PI + Math.PI * i / 28; arcPts.push([ARC.x + Math.cos(a) * ARC.r, ARC.y + Math.sin(a) * ARC.r]); }
+for (let i = 0; i < arcPts.length - 1; i++) seg(...arcPts[i], ...arcPts[i + 1], { e: .3 });
+seg(20, 195, 20, 500);                 // 左牆
+seg(20, 500, 103, 612);                // 左導軌
+seg(380, 195, 380, 730);               // 右牆
+seg(350, 240, 350, 730);               // 發射道隔板
+seg(350, 500, 267, 612);               // 右導軌
+const gate = seg(350, 240, 380, 212, { active: false, e: .3 }); // 單向閘門
+const DIVS = [110, 160, 210, 260];
+DIVS.forEach(x => seg(x, 92, x, 130, { e: .4, post: true }));
+// 彈弓
+seg(55, 410, 55, 490); seg(55, 490, 95, 540);
+const slingL = seg(55, 410, 95, 540, { kick: 330, sling: true });
+seg(315, 410, 315, 490); seg(315, 490, 275, 540);
+const slingR = seg(315, 410, 275, 540, { kick: 330, sling: true });
+
+const bumpers = [
+  { x: 135, y: 268, r: 22, flash: 0, c: '#ff3dbe' },
+  { x: 235, y: 268, r: 22, flash: 0, c: '#3df0ff' },
+  { x: 185, y: 348, r: 22, flash: 0, c: '#ffd23d' },
+];
+const LANES = [135, 185, 235];
+let lights = [false, false, false];
+
+const REST = 0.5, UP = -0.45, SP_UP = 24, SP_DN = 14, FL_LEN = 65, FL_TH = 7;
+const flippers = [
+  { px: 105, py: 612, side: 1, a: REST, prev: REST, up: false },
+  { px: 265, py: 612, side: -1, a: REST, prev: REST, up: false },
+];
+function fseg(f, a) { return { x1: f.px, y1: f.py, x2: f.px + f.side * Math.cos(a) * FL_LEN, y2: f.py + Math.sin(a) * FL_LEN }; }
+
+/* ---------- 狀態 ---------- */
+const G = 600, BR = 9, MAXV = 1800, PL_TOP = 690;
+let ball, state = 'title', score = 0, balls = 3, mult = 1, pull = 0, charging = false;
+let launchTime = 0, saveUsed = false, msg = '', msgT = 0, popups = [], time = 0;
+let hi = 0; try { hi = +localStorage.getItem('neonPinballHi') || 0; } catch (e) {}
+
+function newBall() {
+  ball = { x: 365, y: PL_TOP - BR, vx: 0, vy: 0, r: BR, launched: false };
+  gate.active = false; pull = 0; saveUsed = false;
+}
+function startGame() { score = 0; balls = 3; mult = 1; lights = [false, false, false]; state = 'play'; newBall(); flash('發射！', 1.2); }
+function flash(t, d = 1.5) { msg = t; msgT = d; }
+function addScore(p, x, y) { const v = p * mult; score += v; if (x !== undefined) popups.push({ x, y, t: 0.8, s: '+' + v }); }
+
+/* ---------- 物理 ---------- */
+function closest(px, py, s) {
+  const dx = s.x2 - s.x1, dy = s.y2 - s.y1;
+  let t = ((px - s.x1) * dx + (py - s.y1) * dy) / (dx * dx + dy * dy);
+  t = Math.max(0, Math.min(1, t));
+  return { x: s.x1 + dx * t, y: s.y1 + dy * t, t };
+}
+function collideSeg(b, s, th) {
+  const c = closest(b.x, b.y, s);
+  let nx = b.x - c.x, ny = b.y - c.y; const d = Math.hypot(nx, ny), R = b.r + th;
+  if (d >= R || d === 0) return;
+  nx /= d; ny /= d; b.x = c.x + nx * R; b.y = c.y + ny * R;
+  const vn = b.vx * nx + b.vy * ny;
+  if (vn < 0) { b.vx -= (1 + s.e) * vn * nx; b.vy -= (1 + s.e) * vn * ny; }
+  if (s.kick && vn < -40) {
+    b.vx += nx * s.kick; b.vy += ny * s.kick; s.flash = 1;
+    addScore(10, c.x, c.y); beep(520, .06, 'triangle', .05);
+  }
+}
+function collideFlipper(b, f, dt) {
+  const s = fseg(f, f.a), c = closest(b.x, b.y, s);
+  let nx = b.x - c.x, ny = b.y - c.y; const d = Math.hypot(nx, ny), R = b.r + FL_TH;
+  if (d >= R || d === 0) return;
+  nx /= d; ny /= d; b.x = c.x + nx * R; b.y = c.y + ny * R;
+  const p = fseg(f, f.prev);
+  const svx = (c.x - (p.x1 + (p.x2 - p.x1) * c.t)) / dt, svy = (c.y - (p.y1 + (p.y2 - p.y1) * c.t)) / dt;
+  let rvx = b.vx - svx, rvy = b.vy - svy; const vn = rvx * nx + rvy * ny;
+  if (vn < 0) { rvx -= 1.3 * vn * nx; rvy -= 1.3 * vn * ny; b.vx = rvx + svx; b.vy = rvy + svy; }
+}
+function collideBumper(b, m) {
+  let nx = b.x - m.x, ny = b.y - m.y; const d = Math.hypot(nx, ny), R = b.r + m.r;
+  if (d >= R || d === 0) return;
+  nx /= d; ny /= d; b.x = m.x + nx * R; b.y = m.y + ny * R;
+  const vn = b.vx * nx + b.vy * ny;
+  if (vn < 0) { b.vx -= 1.6 * vn * nx; b.vy -= 1.6 * vn * ny; }
+  b.vx += nx * 380; b.vy += ny * 380; m.flash = 1;
+  addScore(100, m.x, m.y - 28); beep(220 + Math.random() * 80, .1, 'square', .05);
+}
+
+function update(dt) {
+  time += dt;
+  if (msgT > 0) msgT -= dt;
+  bumpers.forEach(m => m.flash = Math.max(0, m.flash - dt * 4));
+  walls.forEach(s => s.flash = Math.max(0, s.flash - dt * 5));
+  popups.forEach(p => { p.t -= dt; p.y -= 30 * dt; }); popups = popups.filter(p => p.t > 0);
+  if (state !== 'play') { flippers.forEach(f => { f.prev = f.a; }); return; }
+
+  if (charging && !ball.launched) pull = Math.min(1, pull + dt * 1.3);
+
+  const SUB = 6, sd = dt / SUB;
+  for (let i = 0; i < SUB; i++) {
+    flippers.forEach(f => {
+      f.prev = f.a;
+      const tgt = f.up ? UP : REST, sp = (f.up ? SP_UP : SP_DN) * sd;
+      f.a = f.a > tgt ? Math.max(tgt, f.a - sp) : Math.min(tgt, f.a + sp);
+    });
+    const b = ball;
+    b.vy += G * sd;
+    const v = Math.hypot(b.vx, b.vy); if (v > MAXV) { b.vx *= MAXV / v; b.vy *= MAXV / v; }
+    b.x += b.vx * sd; b.y += b.vy * sd;
+
+    // 發射彈簧
+    if (b.x > 350) {
+      const plY = PL_TOP + pull * 28;
+      if (b.y + b.r > plY) { b.y = plY - b.r; if (b.vy > 0) b.vy = 0; b.vx *= .9; }
+    }
+    if (!gate.active && b.x < 340 && b.y < 260) { gate.active = true; b.launched = true; }
+
+    for (const s of walls) if (s.active) collideSeg(b, s, s.post ? 3 : 2);
+    for (const m of bumpers) collideBumper(b, m);
+    for (const f of flippers) collideFlipper(b, f, sd);
+  }
+
+  // 上方燈道
+  if (ball.y > 95 && ball.y < 130) {
+    LANES.forEach((x, i) => {
+      if (!lights[i] && Math.abs(ball.x - x) < 22) { lights[i] = true; addScore(50, x, 85); beep(880, .08, 'sine', .05); }
+    });
+    if (lights.every(Boolean)) {
+      lights = [false, false, false]; addScore(1000);
+      if (mult < 5) mult++;
+      flash('倍數 x' + mult + '！'); beep(660, .12, 'sine', .06); setTimeout(() => beep(990, .2, 'sine', .06), 120);
+    }
+  }
+
+  // 掉球
+  if (ball.y > H + 30 || ball.x < -20 || ball.x > W + 20) {
+    if (ball.launched && time - launchTime < 4 && !saveUsed) {
+      newBall(); saveUsed = true; flash('救球！再一次'); beep(440, .2, 'sine', .05);
+    } else {
+      balls--; beep(150, .35, 'sawtooth', .05);
+      if (balls <= 0) {
+        state = 'over';
+        if (score > hi) { hi = score; try { localStorage.setItem('neonPinballHi', hi); } catch (e) {} flash('新紀錄！', 99); }
+      } else { mult = 1; newBall(); flash('剩 ' + balls + ' 顆球'); }
+    }
+  }
+}
+
+function launch() {
+  if (state === 'play' && !ball.launched && ball.x > 350 && ball.y + ball.r >= PL_TOP - 20) {
+    ball.vy = -(650 + 1250 * pull); launchTime = time;
+    beep(300 + pull * 400, .15, 'triangle', .06);
+  }
+  pull = 0;
+}
+
+/* ---------- 操作 ---------- */
+function setFlip(i, on) {
+  const f = flippers[i]; if (f.up === on) return; f.up = on;
+  if (on && state === 'play') {
+    beep(140, .04, 'square', .03);
+    // 按擋板會讓燈道亮燈位置左右輪轉
+    lights = i === 0 ? [lights[1], lights[2], lights[0]] : [lights[2], lights[0], lights[1]];
+  }
+}
+const pointers = new Map();
+function refreshFromPointers() {
+  let l = false, r = false;
+  pointers.forEach(side => { if (side === 0) l = true; else r = true; });
+  setFlip(0, l || keys.l); setFlip(1, r || keys.r);
+}
+const keys = { l: false, r: false };
+addEventListener('pointerdown', e => {
+  initAudio();
+  if (state !== 'play') { startGame(); return; }
+  pointers.set(e.pointerId, e.clientX < innerWidth / 2 ? 0 : 1);
+  if (!ball.launched) charging = true;
+  refreshFromPointers();
+});
+function endPointer(e) {
+  if (!pointers.has(e.pointerId)) return;
+  pointers.delete(e.pointerId); refreshFromPointers();
+  if (charging && pointers.size === 0) { charging = false; launch(); }
+}
+addEventListener('pointerup', endPointer); addEventListener('pointercancel', endPointer);
+addEventListener('keydown', e => {
+  initAudio();
+  const k = e.key;
+  if (['ArrowLeft', 'ArrowRight', 'ArrowDown', ' ', 'z', 'Z', '/', 'm', 'M'].includes(k)) e.preventDefault();
+  if (e.repeat) return;
+  if (state !== 'play') { if (k === ' ' || k === 'Enter') startGame(); return; }
+  if (k === 'ArrowLeft' || k === 'z' || k === 'Z') { keys.l = true; refreshFromPointers(); }
+  if (k === 'ArrowRight' || k === '/' || k === 'm' || k === 'M') { keys.r = true; refreshFromPointers(); }
+  if ((k === ' ' || k === 'ArrowDown') && !ball.launched) charging = true;
+});
+addEventListener('keyup', e => {
+  const k = e.key;
+  if (k === 'ArrowLeft' || k === 'z' || k === 'Z') { keys.l = false; refreshFromPointers(); }
+  if (k === 'ArrowRight' || k === '/' || k === 'm' || k === 'M') { keys.r = false; refreshFromPointers(); }
+  if ((k === ' ' || k === 'ArrowDown') && charging) { charging = false; launch(); }
+});
+document.addEventListener('contextmenu', e => e.preventDefault());
+
+/* ---------- 繪圖 ---------- */
+function glowLine(x1, y1, x2, y2, c, w = 3, blur = 10) {
+  ctx.strokeStyle = c; ctx.lineWidth = w; ctx.shadowColor = c; ctx.shadowBlur = blur;
+  ctx.beginPath(); ctx.moveTo(x1, y1); ctx.lineTo(x2, y2); ctx.stroke();
+}
+function draw() {
+  ctx.setTransform(scale, 0, 0, scale, 0, 0);
+  ctx.shadowBlur = 0;
+  ctx.fillStyle = '#07060f'; ctx.fillRect(0, 0, W, H);
+
+  // 台面底色
+  ctx.beginPath(); ctx.moveTo(20, 195);
+  arcPts.forEach(p => ctx.lineTo(p[0], p[1]));
+  ctx.lineTo(380, H); ctx.lineTo(267, H); ctx.lineTo(267, 612); ctx.lineTo(350, 500);
+  ctx.lineTo(350, 500); ctx.lineTo(103, 612); ctx.lineTo(103, H); ctx.lineTo(20, H); ctx.closePath();
+  const bg = ctx.createLinearGradient(0, 0, 0, H);
+  bg.addColorStop(0, '#1a1240'); bg.addColorStop(1, '#0b0820');
+  ctx.fillStyle = bg;
+  ctx.beginPath(); ctx.moveTo(20, 195); arcPts.forEach(p => ctx.lineTo(p[0], p[1]));
+  ctx.lineTo(380, H); ctx.lineTo(20, H); ctx.closePath(); ctx.fill();
+  // 下方遮罩（導軌以下區域）
+  ctx.fillStyle = '#07060f';
+  ctx.beginPath(); ctx.moveTo(20, 500); ctx.lineTo(103, 612); ctx.lineTo(103, H); ctx.lineTo(20, H); ctx.fill();
+  ctx.beginPath(); ctx.moveTo(350, 500); ctx.lineTo(267, 612); ctx.lineTo(267, H); ctx.lineTo(350, H); ctx.fill();
+
+  // 中央倍數字樣
+  ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
+  ctx.font = '900 64px system-ui,sans-serif'; ctx.fillStyle = 'rgba(160,120,255,.10)';
+  ctx.fillText('x' + mult, 185, 455);
+  ctx.font = '700 16px system-ui,sans-serif'; ctx.fillStyle = 'rgba(160,120,255,.25)';
+  ctx.fillText('NEON PINBALL', 185, 180);
+
+  // 燈道
+  LANES.forEach((x, i) => {
+    ctx.shadowColor = '#7f7'; ctx.shadowBlur = lights[i] ? 16 : 0;
+    ctx.fillStyle = lights[i] ? '#9f9' : '#2a3a2a';
+    ctx.beginPath(); ctx.arc(x, 112, 7, 0, Math.PI * 2); ctx.fill();
+  });
+
+  // 牆
+  ctx.lineCap = 'round';
+  walls.forEach(s => {
+    if (!s.active && s === gate) return;
+    let c = '#8a6cff', w = 3;
+    if (s.sling) { c = s.flash > 0 ? '#fff' : '#ff3dbe'; w = 5; }
+    else if (s.post) { c = '#7f7'; w = 5; }
+    else if (s === gate) c = '#555a';
+    glowLine(s.x1, s.y1, s.x2, s.y2, c, w, s.sling ? 14 : 8);
+  });
+  // 彈弓填色
+  ctx.shadowBlur = 0; ctx.fillStyle = 'rgba(255,61,190,.15)';
+  ctx.beginPath(); ctx.moveTo(55, 410); ctx.lineTo(55, 490); ctx.lineTo(95, 540); ctx.fill();
+  ctx.beginPath(); ctx.moveTo(315, 410); ctx.lineTo(315, 490); ctx.lineTo(275, 540); ctx.fill();
+
+  // 彈跳柱
+  bumpers.forEach(m => {
+    ctx.shadowColor = m.c; ctx.shadowBlur = 12 + m.flash * 25;
+    ctx.fillStyle = m.flash > .3 ? '#fff' : '#120c2a';
+    ctx.beginPath(); ctx.arc(m.x, m.y, m.r + m.flash * 3, 0, Math.PI * 2); ctx.fill();
+    ctx.lineWidth = 4; ctx.strokeStyle = m.c; ctx.stroke();
+    ctx.shadowBlur = 0; ctx.fillStyle = m.c;
+    ctx.beginPath(); ctx.arc(m.x, m.y, 7, 0, Math.PI * 2); ctx.fill();
+  });
+
+  // 擋板
+  flippers.forEach(f => {
+    const s = fseg(f, f.a);
+    glowLine(s.x1, s.y1, s.x2, s.y2, f.up ? '#fff' : '#ffd23d', FL_TH * 2, 14);
+    ctx.shadowBlur = 0; ctx.fillStyle = '#07060f';
+    ctx.beginPath(); ctx.arc(f.px, f.py, 3, 0, Math.PI * 2); ctx.fill();
+  });
+
+  // 發射彈簧
+  const plY = PL_TOP + pull * 28;
+  ctx.shadowBlur = 0;
+  ctx.strokeStyle = '#888'; ctx.lineWidth = 2; ctx.beginPath();
+  for (let i = 0; i <= 8; i++) { const y = plY + 6 + i * ((H - plY - 6) / 8); ctx.lineTo(i % 2 ? 358 : 372, y); }
+  ctx.stroke();
+  ctx.fillStyle = charging ? '#ff3dbe' : '#ccc'; ctx.fillRect(353, plY, 24, 6);
+  if (charging && ball && !ball.launched) {
+    ctx.fillStyle = '#ff3dbe'; ctx.fillRect(384, H - 10 - pull * 120, 8, pull * 120);
+  }
+
+  // 球
+  if (ball && state !== 'title') {
+    const g = ctx.createRadialGradient(ball.x - 3, ball.y - 3, 1, ball.x, ball.y, ball.r);
+    g.addColorStop(0, '#fff'); g.addColorStop(.6, '#cfd3e0'); g.addColorStop(1, '#6b7080');
+    ctx.shadowColor = '#fff'; ctx.shadowBlur = 8; ctx.fillStyle = g;
+    ctx.beginPath(); ctx.arc(ball.x, ball.y, ball.r, 0, Math.PI * 2); ctx.fill();
+  }
+
+  // 得分浮字
+  ctx.shadowBlur = 0; ctx.font = '700 14px system-ui,sans-serif';
+  popups.forEach(p => { ctx.globalAlpha = Math.min(1, p.t * 2); ctx.fillStyle = '#fff'; ctx.fillText(p.s, p.x, p.y); });
+  ctx.globalAlpha = 1;
+
+  // 訊息
+  if (msgT > 0 && state === 'play') {
+    ctx.font = '800 26px system-ui,sans-serif'; ctx.fillStyle = '#7ff'; ctx.shadowColor = '#0ff'; ctx.shadowBlur = 14;
+    ctx.fillText(msg, 185, 410);
+  }
+  if (state === 'play' && ball && !ball.launched && !charging && Math.floor(time * 2) % 2 === 0) {
+    ctx.shadowBlur = 0; ctx.font = '600 13px system-ui,sans-serif'; ctx.fillStyle = '#fffa';
+    ctx.fillText('按住螢幕蓄力，放開發射', 185, 520);
+  }
+
+  if (state !== 'play') {
+    ctx.shadowBlur = 0; ctx.fillStyle = 'rgba(5,4,15,.72)'; ctx.fillRect(0, 0, W, H);
+    ctx.shadowColor = '#f3c'; ctx.shadowBlur = 20; ctx.fillStyle = '#ff7ad9';
+    ctx.font = '900 40px system-ui,sans-serif';
+    ctx.fillText(state === 'title' ? '霓虹彈珠台' : '遊戲結束', 200, 250);
+    ctx.shadowBlur = 0; ctx.fillStyle = '#e8e6ff'; ctx.font = '600 16px system-ui,sans-serif';
+    if (state === 'over') {
+      ctx.fillText('分數 ' + score.toLocaleString(), 200, 310);
+      if (msgT > 0 && msg === '新紀錄！') { ctx.fillStyle = '#ffd23d'; ctx.fillText('★ 新紀錄！ ★', 200, 340); ctx.fillStyle = '#e8e6ff'; }
+    }
+    const lines = ['點左半邊 → 左擋板', '點右半邊 → 右擋板', '按住蓄力，放開發射', '燈道 3 燈全亮 → 倍數 +1', '鍵盤：← → 擋板，空白鍵 發射'];
+    ctx.font = '14px system-ui,sans-serif'; ctx.fillStyle = '#bbb';
+    lines.forEach((l, i) => ctx.fillText(l, 200, 400 + i * 26));
+    if (Math.floor(time * 2) % 2 === 0) {
+      ctx.font = '700 20px system-ui,sans-serif'; ctx.fillStyle = '#7ff';
+      ctx.fillText(state === 'title' ? '點一下開始' : '點一下再玩一次', 200, 560);
+    }
+  }
+  ctx.shadowBlur = 0;
+
+  document.getElementById('score').textContent = score.toLocaleString();
+  document.getElementById('balls').textContent = state === 'play' ? balls : (state === 'over' ? 0 : 3);
+  document.getElementById('mult').textContent = 'x' + mult;
+  document.getElementById('hi').textContent = hi.toLocaleString();
+}
+
+/* ---------- 主迴圈 ---------- */
+newBall();
+let last = performance.now(), acc = 0; const STEP = 1 / 120;
+function loop(t) {
+  acc += Math.min(.05, (t - last) / 1000); last = t;
+  while (acc >= STEP) { update(STEP); acc -= STEP; }
+  draw(); requestAnimationFrame(loop);
+}
+requestAnimationFrame(loop);
+window.__pb = { get ball() { return ball; }, get state() { return state; }, get score() { return score; }, get balls() { return balls; }, flippers, update, startGame, launch, setPull: v => pull = v };
+})();
+</script>
+</body>
+</html>

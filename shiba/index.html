@@ -1,0 +1,276 @@
+<!DOCTYPE html>
+<html lang="zh-Hant">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1,maximum-scale=1">
+<title>柴犬寵物</title>
+<style>
+  :root{--ink:#4a2a22;--acc:#d9822b}
+  *{box-sizing:border-box}
+  html,body{margin:0;min-height:100%;background:linear-gradient(180deg,#fff4e0,#f3e0c2);color:var(--ink);font-family:system-ui,-apple-system,"PingFang TC","Noto Sans TC",sans-serif;-webkit-tap-highlight-color:transparent;overflow-x:hidden}
+  #app{max-width:480px;margin:0 auto;padding:10px 14px 28px}
+  header{display:flex;align-items:center;gap:8px}
+  #name{font-size:20px;font-weight:800;border:0;background:transparent;color:var(--ink);width:9em;padding:2px 4px;border-bottom:2px dashed #e7c9a0}
+  #name:focus{outline:none;border-bottom-color:var(--acc)}
+  .bars{display:grid;grid-template-columns:repeat(3,1fr);gap:8px;margin:8px 0 4px}
+  .bar{font-size:12px}
+  .bar div{height:9px;background:#0001;border-radius:5px;overflow:hidden;margin-top:3px}
+  .bar i{display:block;height:100%;border-radius:5px;transition:width .4s}
+  #stage{position:relative;height:min(50vh,400px);overflow:hidden;border-radius:18px;background:linear-gradient(180deg,#bde0fe 0 62%,#8fb33f 62% 63.5%,#a7c957 63.5% 100%)}
+  svg#dog{position:absolute;left:50%;bottom:2%;height:92%;transform:translateX(-50%);overflow:visible;cursor:pointer;touch-action:none}
+  #bubble{position:absolute;top:4%;left:4%;max-width:60%;background:#fff;border-radius:16px;padding:9px 13px;font-size:17px;font-weight:700;box-shadow:0 4px 14px #0002;opacity:0;transform:scale(.7);transform-origin:80% 100%;transition:all .2s;pointer-events:none;z-index:3;word-break:break-word}
+  #bubble.show{opacity:1;transform:scale(1)}
+  #bubble:after{content:"";position:absolute;right:22px;bottom:-10px;border:10px solid transparent;border-top-color:#fff;border-bottom:0}
+  .fx{position:absolute;font-size:22px;pointer-events:none;animation:up 1.3s ease-out forwards;z-index:4}
+  @keyframes up{to{transform:translateY(-70px);opacity:0}}
+  #ball{position:absolute;width:26px;height:26px;border-radius:50%;background:radial-gradient(circle at 35% 35%,#fff7,#e63946 45%,#9d0208);display:none;z-index:2}
+  #bowl{position:absolute;left:8%;bottom:5%;font-size:38px;display:none}
+  .row{display:flex;gap:8px;margin-top:10px}
+  .row>*{flex:1}
+  button{font-size:15px;border:0;border-radius:12px;padding:11px 6px;font-weight:700;background:#fff;color:var(--ink);border:2px solid #ecd3b0}
+  button:active{transform:scale(.96)}
+  button.pri{background:var(--acc);color:#fff;border-color:var(--acc)}
+  input#txt{flex:2.4;font-size:16px;padding:10px 12px;border-radius:12px;border:2px solid #ecd3b0;background:#fff;outline:none}
+  .hint{font-size:12px;color:#8a6a55;margin-top:10px;line-height:1.6}
+  /* 動畫 */
+  #tail{transform-origin:206px 262px;animation:wag var(--wag,.5s) ease-in-out infinite alternate}
+  @keyframes wag{from{transform:rotate(-12deg)}to{transform:rotate(14deg)}}
+  #head{transform-origin:150px 190px;transition:transform .35s cubic-bezier(.3,1.6,.5,1)}
+  #dogBody{transform-origin:150px 318px}
+  .breath{animation:breath 3s ease-in-out infinite}
+  @keyframes breath{50%{transform:scale(1.015,.99)}}
+  #lids{transform-origin:150px 110px;transform:scaleY(0);transition:transform .08s}
+  #mouthOpen{transform-origin:150px 150px;transition:transform .08s}
+  .hop{animation:hop .45s ease-out}
+  @keyframes hop{40%{transform:translateY(-38px)}70%{transform:translateY(0) scale(1.05,.95)}}
+  .spin{animation:spin .9s ease-in-out}
+  @keyframes spin{50%{transform:translateY(-10px) scaleX(-1)}}
+  .eat #head{animation:eat .45s ease-in-out infinite}
+  @keyframes eat{50%{transform:translate(-4px,20px) rotate(-12deg)}}
+  #zzz{opacity:0;transition:opacity .4s}
+  .sleep #zzz{opacity:1}
+  .sleep #eyesOpen{display:none} .sleep #eyesSleep{display:inline}
+  .sleep #head{transform:translateY(14px) rotate(-6deg)}
+  .sleep #tail{animation:none}
+  .happy #eyesOpen{display:none} .happy #eyesHappy{display:inline}
+  #eyesHappy,#eyesSleep{display:none}
+  .sleep #eyesHappy{display:none!important}
+  .zz{animation:zz 2s linear infinite}
+  @keyframes zz{0%{opacity:0;transform:translate(0,0)}30%{opacity:1}100%{opacity:0;transform:translate(16px,-26px)}}
+</style>
+</head>
+<body>
+<div id="app">
+  <header>🐕 <input id="name" maxlength="8" value="小柴" aria-label="名字"><span style="font-size:12px;color:#a07a5f">← 點名字可以改</span></header>
+  <div class="bars">
+    <div class="bar">🍖 飽足<div><i id="bFood" style="background:#f4a261"></i></div></div>
+    <div class="bar">💛 心情<div><i id="bMood" style="background:#ffb703"></i></div></div>
+    <div class="bar">⚡ 體力<div><i id="bEnergy" style="background:#8ecae6"></i></div></div>
+  </div>
+  <div id="stage">
+    <div id="bubble"></div>
+    <div id="bowl">🥣</div>
+    <div id="ball"></div>
+    <svg id="dog" viewBox="0 0 300 340" aria-label="柴犬">
+      <g id="dogMove">
+      <ellipse cx="150" cy="322" rx="78" ry="10" fill="#0002"/>
+      <g id="dogBody" class="breath">
+        <!-- 尾巴 -->
+        <g id="tail">
+          <path d="M200 268 C252 262 262 205 230 196 C208 190 200 214 216 222" fill="none" stroke="#d9822b" stroke-width="26" stroke-linecap="round"/>
+          <path d="M214 255 C246 248 250 214 232 208" fill="none" stroke="#fbefe0" stroke-width="9" stroke-linecap="round"/>
+        </g>
+        <!-- 身體 -->
+        <path d="M88 318 C76 248 90 168 150 160 C210 168 224 248 212 318 Z" fill="#d9822b"/>
+        <path d="M150 176 C118 180 110 236 118 300 L182 300 C190 236 182 180 150 176 Z" fill="#fbefe0"/>
+        <!-- 前腳 -->
+        <rect x="112" y="250" width="28" height="70" rx="13" fill="#e08d3a"/>
+        <rect x="160" y="250" width="28" height="70" rx="13" fill="#e08d3a"/>
+        <rect x="112" y="290" width="28" height="30" rx="12" fill="#fbefe0"/>
+        <rect x="160" y="290" width="28" height="30" rx="12" fill="#fbefe0"/>
+        <path d="M120 314 v5 M126 314 v5 M132 314 v5 M168 314 v5 M174 314 v5 M180 314 v5" stroke="#e3cdb4" stroke-width="2" stroke-linecap="round"/>
+        <!-- 脖子：讓頭和身體連在一起 -->
+        <path d="M106 140 Q150 128 194 140 C204 170 204 190 198 206 Q150 220 102 206 C96 190 96 170 106 140 Z" fill="#d9822b"/>
+        <path d="M124 160 Q150 152 176 160 L180 214 Q150 222 120 214 Z" fill="#fbefe0"/>
+        <!-- 項圈 -->
+        <path d="M108 186 Q150 204 192 186" fill="none" stroke="#e63946" stroke-width="9" stroke-linecap="round"/>
+        <circle cx="150" cy="202" r="7" fill="#ffd166" stroke="#d4a017" stroke-width="2"/>
+        <!-- 頭 -->
+        <g id="head">
+          <path d="M84 100 Q88 52 104 30 Q122 46 138 70 Z" fill="#d9822b" stroke="#d9822b" stroke-width="8" stroke-linejoin="round"/>
+          <path d="M96 88 Q100 58 106 44 Q118 56 128 72 Z" fill="#f6d7cc"/>
+          <path d="M216 100 Q212 52 196 30 Q178 46 162 70 Z" fill="#d9822b" stroke="#d9822b" stroke-width="8" stroke-linejoin="round"/>
+          <path d="M204 88 Q200 58 194 44 Q182 56 172 72 Z" fill="#f6d7cc"/>
+          <path d="M150 54 C206 54 224 92 222 126 C220 166 188 186 150 186 C112 186 80 166 78 126 C76 92 94 54 150 54 Z" fill="#d9822b"/>
+          <!-- 白色臉頰與口鼻 -->
+          <path d="M150 116 C176 116 214 120 216 140 C218 168 188 184 150 184 C112 184 82 168 84 140 C86 120 124 116 150 116 Z" fill="#fbefe0"/>
+          <!-- 白眉 -->
+          <ellipse cx="124" cy="94" rx="9" ry="5.5" fill="#fbefe0" transform="rotate(-18 124 94)"/>
+          <ellipse cx="176" cy="94" rx="9" ry="5.5" fill="#fbefe0" transform="rotate(18 176 94)"/>
+          <!-- 眼睛 -->
+          <g id="eyesOpen"><ellipse cx="126" cy="110" rx="5.5" ry="6.5" fill="#1d1414"/><ellipse cx="174" cy="110" rx="5.5" ry="6.5" fill="#1d1414"/><circle cx="128" cy="107.5" r="1.8" fill="#fff"/><circle cx="176" cy="107.5" r="1.8" fill="#fff"/></g>
+          <g id="eyesHappy" fill="none" stroke="#1d1414" stroke-width="3.5" stroke-linecap="round"><path d="M118 112 Q126 102 134 112"/><path d="M166 112 Q174 102 182 112"/></g>
+          <g id="eyesSleep" fill="none" stroke="#1d1414" stroke-width="3" stroke-linecap="round"><path d="M118 108 Q126 114 134 108"/><path d="M166 108 Q174 114 182 108"/></g>
+          <g id="lids"><ellipse cx="126" cy="110" rx="7.5" ry="8" fill="#d9822b"/><ellipse cx="174" cy="110" rx="7.5" ry="8" fill="#d9822b"/></g>
+          <!-- 腮紅 -->
+          <ellipse cx="104" cy="140" rx="10" ry="6" fill="#f4a3a3" opacity=".45"/><ellipse cx="196" cy="140" rx="10" ry="6" fill="#f4a3a3" opacity=".45"/>
+          <!-- 鼻子 -->
+          <path d="M139 128 Q150 120 161 128 Q158 139 150 141 Q142 139 139 128 Z" fill="#4a2a22"/>
+          <ellipse cx="146" cy="127" rx="3" ry="1.6" fill="#fff8"/>
+          <!-- 嘴巴 -->
+          <g id="mouthOpen">
+            <path d="M132 150 Q150 178 168 150 Q150 156 132 150 Z" fill="#e8786b" stroke="#4a2a22" stroke-width="2.5" stroke-linejoin="round"/>
+            <path d="M136 151 l3 6 l3 -5 Z M164 151 l-3 6 l-3 -5 Z" fill="#fff"/>
+          </g>
+          <path d="M150 141 V149 M126 146 Q138 158 150 149 Q162 158 174 146" fill="none" stroke="#4a2a22" stroke-width="3" stroke-linecap="round"/>
+          <g id="zzz" fill="#5e60ce" font-weight="900" font-family="system-ui"><text x="214" y="60" font-size="20" class="zz">Z</text><text x="232" y="40" font-size="14" class="zz" style="animation-delay:.7s">z</text><text x="246" y="24" font-size="11" class="zz" style="animation-delay:1.4s">z</text></g>
+        </g>
+      </g>
+      </g>
+    </svg>
+  </div>
+  <div class="row">
+    <button id="feed">🍖 餵食</button><button id="throw">🎾 丟球</button><button id="sleepBtn">😴 睡覺</button>
+  </div>
+  <div class="hint">👆 點牠會「汪！」・在頭上來回摸摸牠會很開心・心情很好時會轉圈圈・小柴只會汪汪叫，不會講人話<br>狀態會隨時間慢慢下降，記得常回來陪牠。沒聲音請確認手機不是靜音模式。</div>
+</div>
+<script>
+(() => {
+const $ = id => document.getElementById(id);
+const svg = $('dog'), stage = $('stage');
+
+/* 狀態 */
+let st = { name: '小柴', food: 70, mood: 70, energy: 80, sleeping: false, last: Date.now() };
+try { const s = JSON.parse(localStorage.getItem('shibaPet') || 'null'); if (s) st = { ...st, ...s }; } catch (e) {}
+// 離開期間的變化
+(() => { const mins = Math.min(600, (Date.now() - st.last) / 60000); st.food -= mins * .25; st.mood -= mins * .15; st.energy += st.sleeping ? mins * .6 : -mins * .1; clamp(); })();
+function clamp() { for (const k of ['food', 'mood', 'energy']) st[k] = Math.max(0, Math.min(100, st[k])); }
+function save() { st.last = Date.now(); try { localStorage.setItem('shibaPet', JSON.stringify(st)); } catch (e) {} }
+function renderBars() {
+  clamp();
+  $('bFood').style.width = st.food + '%'; $('bMood').style.width = st.mood + '%'; $('bEnergy').style.width = st.energy + '%';
+  svg.style.setProperty('--wag', st.mood > 70 ? '.18s' : st.mood > 35 ? '.35s' : '.9s');
+  svg.classList.toggle('sleep', st.sleeping);
+  $('sleepBtn').textContent = st.sleeping ? '☀️ 叫醒' : '😴 睡覺';
+  save();
+}
+$('name').value = st.name;
+$('name').addEventListener('change', () => { st.name = $('name').value.trim() || '小柴'; $('name').value = st.name; save(); bubble('汪汪！', 1200); bark(2); });
+
+/* 聲音 */
+let ac = null;
+function audio() { if (!ac) { try { ac = new (window.AudioContext || window.webkitAudioContext)(); } catch (e) {} } else if (ac.state === 'suspended') ac.resume(); return ac; }
+function bark(n = 1) {
+  const a = audio(); if (!a) return;
+  for (let i = 0; i < n; i++) {
+    const t = a.currentTime + i * .22;
+    const o = a.createOscillator(), g = a.createGain(), f = a.createBiquadFilter();
+    o.type = 'sawtooth'; o.frequency.setValueAtTime(520, t); o.frequency.exponentialRampToValueAtTime(260, t + .13);
+    f.type = 'bandpass'; f.frequency.value = 900; f.Q.value = 1.4;
+    g.gain.setValueAtTime(.0001, t); g.gain.exponentialRampToValueAtTime(.35, t + .015); g.gain.exponentialRampToValueAtTime(.0001, t + .16);
+    o.connect(f).connect(g).connect(a.destination); o.start(t); o.stop(t + .18);
+    const nb = a.createBuffer(1, a.sampleRate * .08, a.sampleRate), d = nb.getChannelData(0);
+    for (let k = 0; k < d.length; k++) d[k] = (Math.random() * 2 - 1) * (1 - k / d.length);
+    const ns = a.createBufferSource(), ng = a.createGain(); ns.buffer = nb; ng.gain.value = .12; ns.connect(f); ns.start(t);
+  }
+}
+function whine() { const a = audio(); if (!a) return; const t = a.currentTime, o = a.createOscillator(), g = a.createGain(); o.frequency.setValueAtTime(900, t); o.frequency.linearRampToValueAtTime(1300, t + .25); o.frequency.linearRampToValueAtTime(800, t + .6); g.gain.setValueAtTime(.05, t); g.gain.exponentialRampToValueAtTime(.0001, t + .65); o.connect(g).connect(a.destination); o.start(t); o.stop(t + .7); }
+
+/* 表情與動作 */
+let busy = false, mouthT = null, bubT = null;
+function mouth(on) { clearInterval(mouthT); const m = $('mouthOpen'); if (!on) { m.style.transform = ''; return; } let o = false; mouthT = setInterval(() => { o = !o; m.style.transform = o ? 'scaleY(1.45)' : 'scaleY(.8)'; }, 120); }
+function bubble(text, ms = 1800) { const b = $('bubble'); b.textContent = text; b.classList.add('show'); clearTimeout(bubT); bubT = setTimeout(() => b.classList.remove('show'), ms); }
+function tilt() { const h = $('head'); if (st.sleeping) return; h.style.transform = `rotate(${(Math.random() < .5 ? -1 : 1) * (8 + Math.random() * 8)}deg)`; setTimeout(() => h.style.transform = '', 800); }
+function blink() { if (st.sleeping) return; const l = $('lids'); l.style.transform = 'scaleY(1)'; setTimeout(() => l.style.transform = 'scaleY(0)', 120); }
+(function bl() { blink(); setTimeout(bl, 2000 + Math.random() * 3500); })();
+function happy(ms = 1200) { svg.classList.add('happy'); clearTimeout(happy.t); happy.t = setTimeout(() => svg.classList.remove('happy'), ms); }
+function anim(cls) { const g = $('dogMove'); g.classList.remove(cls); void g.getBBox(); g.classList.add(cls); setTimeout(() => g.classList.remove(cls), 950); }
+function fx(emoji, x, y) {
+  const r = stage.getBoundingClientRect(), e = document.createElement('div'); e.className = 'fx'; e.textContent = emoji;
+  e.style.left = (x - r.left - 11) + 'px'; e.style.top = (y - r.top - 20) + 'px'; stage.appendChild(e); setTimeout(() => e.remove(), 1400);
+}
+const headPoint = () => { const r = svg.getBoundingClientRect(); return [r.left + r.width / 2, r.top + r.height * .3]; };
+function wake() { st.sleeping = false; renderBars(); tilt(); }
+
+/* 摸頭與點擊 */
+let petDist = 0, lastP = null, down = false, moved = 0;
+svg.addEventListener('pointerdown', e => { audio(); down = true; moved = 0; lastP = [e.clientX, e.clientY]; svg.setPointerCapture(e.pointerId); });
+svg.addEventListener('pointermove', e => {
+  if (!down || busy) return;
+  const d = Math.hypot(e.clientX - lastP[0], e.clientY - lastP[1]); lastP = [e.clientX, e.clientY]; moved += d;
+  const r = svg.getBoundingClientRect(), ry = (e.clientY - r.top) / r.height;
+  if (ry < .58 && !st.sleeping) {
+    petDist += d; happy(900); $('head').style.transform = `rotate(${Math.sin(Date.now() / 150) * 6}deg)`;
+    if (petDist > 260) { petDist = 0; st.mood += 3; renderBars(); fx(['💛', '🧡', '✨'][Math.random() * 3 | 0], e.clientX, e.clientY - 20); }
+  }
+});
+svg.addEventListener('pointerup', e => {
+  down = false; $('head').style.transform = '';
+  if (moved > 12 || busy) return;
+  if (st.sleeping) { wake(); bubble('汪？', 1200); bark(1); return; }
+  bark(Math.random() < .5 ? 1 : 2); anim('hop'); happy(); bubble('汪！', 900); st.mood += 2; renderBars();
+});
+
+/* 餵食 */
+$('feed').onclick = () => {
+  audio(); if (busy) return; if (st.sleeping) wake();
+  if (st.food > 92) { bubble('嗚～', 1300); whine(); return; }
+  busy = true; $('bowl').style.display = 'block';
+  const bowlR = $('bowl').getBoundingClientRect(), dr = svg.getBoundingClientRect();
+  svg.style.transition = 'left .5s'; svg.style.left = '38%';
+  setTimeout(() => { svg.classList.add('eat'); const ck = setInterval(() => { const a = audio(); if (a) { const t = a.currentTime, o = a.createOscillator(), g = a.createGain(); o.frequency.value = 180 + Math.random() * 80; g.gain.setValueAtTime(.05, t); g.gain.exponentialRampToValueAtTime(.0001, t + .06); o.connect(g).connect(a.destination); o.start(t); o.stop(t + .07); } }, 230);
+    setTimeout(() => { clearInterval(ck); svg.classList.remove('eat'); $('bowl').style.display = 'none'; svg.style.left = '50%';
+      st.food += 30; st.mood += 6; renderBars(); happy(1400); fx('😋', ...headPoint()); bubble('汪汪！', 1400); bark(2); busy = false; }, 2200); }, 500);
+};
+
+/* 丟球 */
+$('throw').onclick = () => {
+  audio(); if (busy) return; if (st.sleeping) wake();
+  if (st.energy < 15) { bubble('嗚…', 1500); whine(); return; }
+  busy = true; const ball = $('ball'), sw = stage.clientWidth, sh = stage.clientHeight;
+  ball.style.display = 'block';
+  ball.animate([{ left: (sw * .5) + 'px', top: (sh * .55) + 'px' }, { left: (sw * .8) + 'px', top: (sh * .05) + 'px', offset: .45 }, { left: (sw + 40) + 'px', top: (sh * .75) + 'px' }], { duration: 900, easing: 'ease-out', fill: 'forwards' });
+  bark(2);
+  setTimeout(() => {
+    const run = svg.animate([{ left: '50%' }, { left: '150%' }], { duration: 700, easing: 'ease-in', fill: 'forwards' });
+    run.onfinish = () => {
+      ball.style.display = 'none';
+      setTimeout(() => {
+        const back = svg.animate([{ left: '150%' }, { left: '50%' }], { duration: 800, easing: 'ease-out', fill: 'forwards' });
+        $('mouthOpen').style.transform = 'scaleY(.6)';
+        back.onfinish = () => { svg.getAnimations().forEach(a => a.cancel()); svg.style.left = '50%'; $('mouthOpen').style.transform = '';
+          st.mood += 14; st.energy -= 12; st.food -= 4; renderBars(); happy(1500); anim('spin'); fx('🎾', ...headPoint()); bubble('汪汪汪！', 1500); bark(2); busy = false; };
+      }, 900);
+    };
+  }, 450);
+};
+
+/* 睡覺 */
+$('sleepBtn').onclick = () => { audio(); if (busy) return; if (st.sleeping) { wake(); bubble('汪！', 1100); bark(1); } else { st.sleeping = true; renderBars(); bubble('zzZ…', 1200); } };
+
+
+/* 時間流逝與閒置行為 */
+setInterval(() => {
+  st.food -= .5; st.mood -= .3; st.energy += st.sleeping ? 2.5 : -.25;
+  if (st.sleeping && st.energy >= 100) { st.sleeping = false; bubble('汪！', 1400); bark(1); }
+  if (!st.sleeping && st.energy < 8) { st.sleeping = true; bubble('哈～嗚…', 1200); }
+  renderBars();
+}, 10000);
+(function idle() {
+  setTimeout(() => {
+    if (!busy && !st.sleeping && document.visibilityState === 'visible') {
+      const r = Math.random();
+      if (st.food < 25 && r < .5) { bubble('嗚嗚…（咕嚕嚕）', 1800); whine(); }
+      else if (st.mood > 80 && r < .35) { anim('spin'); happy(1000); }
+      else if (r < .25) { $('mouthOpen').style.transform = 'scaleY(1.8)'; setTimeout(() => $('mouthOpen').style.transform = '', 900); bubble('哈～嗚～', 900); }
+      else if (r < .55) tilt();
+    }
+    idle();
+  }, 6000 + Math.random() * 7000);
+})();
+renderBars();
+window.__shiba = { get st() { return st; } };
+})();
+</script>
+</body>
+</html>

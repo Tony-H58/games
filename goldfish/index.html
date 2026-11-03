@@ -1,0 +1,339 @@
+<!DOCTYPE html>
+<html lang="zh-Hant">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1,maximum-scale=1,user-scalable=no">
+<title>撈金魚</title>
+<style>
+  html,body{margin:0;height:100%;background:#1d1a2f;color:#fff6e5;font-family:system-ui,-apple-system,"PingFang TC","Noto Sans TC",sans-serif;overflow:hidden;touch-action:none;user-select:none;-webkit-user-select:none}
+  #hud{max-width:520px;margin:0 auto;display:flex;justify-content:space-between;align-items:center;padding:8px 14px 2px;font-size:11px}
+  #hud b{display:block;font-size:21px;color:#ffd166;font-variant-numeric:tabular-nums}
+  #nets{font-size:18px;letter-spacing:2px}
+  #dur{width:90px;height:8px;background:#ffffff22;border-radius:4px;overflow:hidden;margin-top:4px}
+  #dur i{display:block;height:100%;width:100%;background:linear-gradient(90deg,#e63946,#ffd166,#90e0ef);transition:width .1s}
+  #tip{text-align:center;font-size:13px;height:18px;color:#ffd166}
+  #wrap{position:relative;display:flex;justify-content:center}
+  canvas{display:block;touch-action:none;border-radius:14px}
+  .ov{position:absolute;inset:0;display:flex;align-items:center;justify-content:center}
+  .box{background:#2b2440ee;border:2px solid #ff9f1c;border-radius:16px;padding:20px;width:min(310px,86%);text-align:center}
+  .box h2{margin:0 0 6px;font-size:28px;color:#ffbf69}
+  .box p{font-size:13px;line-height:1.75;margin:6px 0 14px;text-align:left}
+  .go{width:100%;background:#ff7b00;color:#fff;border:0;border-radius:12px;padding:13px;font-size:17px;font-weight:800}
+  .catch{display:grid;grid-template-columns:1fr 1fr;gap:6px;margin:8px 0 12px;font-size:13px}
+  .catch div{background:#0004;border-radius:10px;padding:7px}
+  .catch b{color:#ffd166;font-size:18px}
+  [hidden]{display:none!important}
+</style>
+</head>
+<body>
+<div id="hud">
+  <div>分數<b id="hScore">0</b></div>
+  <div>撈到<b id="hCount">0</b></div>
+  <div style="text-align:center">紙網<div id="nets"></div></div>
+  <div style="text-align:right">紙的強度<div id="dur"><i></i></div></div>
+</div>
+<div id="tip"></div>
+<div id="wrap">
+  <canvas id="c"></canvas>
+  <div class="ov" id="menu"><div class="box">
+    <h2>🐟 撈金魚</h2>
+    <p>👆 手指握的是<b>網子的柄</b>，網子在手指左上方。<b>按住</b>把紙網放進水裡，<b>拖到魚的下方</b>，<b>放開</b>就撈起來！<br>
+    📄 紙泡在水裡越久、拖得越快，<b>越容易破</b>；大魚也比較傷紙。<br>
+    🐠 網子衝太快，魚會被嚇跑，要從後面慢慢靠近。<br>
+    一共 3 支紙網，破完就結束。<br>
+    🔴 小金魚 10・⚫ 黑凸眼 15・🎨 花大金魚 30・✨ 金色稀有魚 100</p>
+    <button class="go" id="start">一支 3 網，開始撈！</button>
+  </div></div>
+  <div class="ov" id="over" hidden><div class="box">
+    <h2 id="oTitle"></h2>
+    <div class="catch" id="catch"></div>
+    <p id="oSub" style="text-align:center"></p>
+    <button class="go" id="again">再撈一次</button>
+  </div></div>
+</div>
+<script>
+(() => {
+const W = 400, H = 640, NETS = 3, NR = 36;
+const OFF = { x: -58, y: -84 };   // 手握在柄上：網子中心在手指的左上方
+const POOL = { x: 14, y: 14, w: 372, h: 500, r: 40 };
+const BOWL = { x: 315, y: 580, r: 48 };
+const cv = document.getElementById('c'), ctx = cv.getContext('2d');
+let scale = 1;
+function resize() {
+  const top = document.getElementById('hud').offsetHeight + document.getElementById('tip').offsetHeight;
+  const s = Math.min((innerWidth - 8) / W, (innerHeight - top - 8) / H), d = window.devicePixelRatio || 1;
+  cv.style.width = W * s + 'px'; cv.style.height = H * s + 'px';
+  cv.width = Math.round(W * s * d); cv.height = Math.round(H * s * d); scale = s * d;
+}
+addEventListener('resize', resize); resize();
+
+/* 音效 */
+let ac = null;
+function initAudio() { if (!ac) { try { ac = new (window.AudioContext || window.webkitAudioContext)(); } catch (e) {} } else if (ac.state === 'suspended') ac.resume(); }
+function noise(d, v, lp, hp = 0) {
+  if (!ac) return; const n = ac.sampleRate * d, b = ac.createBuffer(1, n, ac.sampleRate), x = b.getChannelData(0);
+  for (let i = 0; i < n; i++) x[i] = (Math.random() * 2 - 1) * Math.pow(1 - i / n, 2);
+  const s = ac.createBufferSource(), f = ac.createBiquadFilter(), g = ac.createGain(); s.buffer = b; f.type = 'lowpass'; f.frequency.value = lp; g.gain.value = v;
+  let nd = s.connect(f); if (hp) { const h = ac.createBiquadFilter(); h.type = 'highpass'; h.frequency.value = hp; nd = nd.connect(h); } nd.connect(g).connect(ac.destination); s.start();
+}
+function tone(f, d, type = 'sine', v = .06, f2, delay = 0) { if (!ac) return; const t = ac.currentTime + delay, o = ac.createOscillator(), g = ac.createGain(); o.type = type; o.frequency.setValueAtTime(f, t); if (f2) o.frequency.exponentialRampToValueAtTime(f2, t + d); g.gain.setValueAtTime(v, t); g.gain.exponentialRampToValueAtTime(.0001, t + d); o.connect(g).connect(ac.destination); o.start(t); o.stop(t + d + .02); }
+const sSplash = () => noise(.25, .25, 2500, 300);
+const sPlop = () => { tone(500, .12, 'sine', .1, 1200); };
+const sCatch = big => [660, 880, big ? 1320 : 1100].forEach((f, i) => tone(f, .14, 'sine', .07, null, i * .08));
+const sRip = () => noise(.35, .4, 6000, 1800);
+
+/* 魚 */
+const TYPES = {
+  red:   { size: 13, speed: 70, pts: 10, wt: 7, name: '小金魚' },
+  black: { size: 15, speed: 45, pts: 15, wt: 9, name: '黑凸眼' },
+  big:   { size: 22, speed: 40, pts: 30, wt: 20, name: '花大金魚' },
+  gold:  { size: 15, speed: 110, pts: 100, wt: 10, name: '金色稀有魚' },
+};
+let fish = [], ripples = [], fx = [], caught = [], state = 'menu', t = 0;
+let net = null, netsLeft = NETS, dur = 100, score = 0, broken = 0, bestFish = null;
+let best = 0; try { best = +localStorage.getItem('goldfishBest') || 0; } catch (e) {}
+function rndType() { const r = Math.random(); return r < .05 ? 'gold' : r < .2 ? 'big' : r < .42 ? 'black' : 'red'; }
+function addFish(type, x, y) {
+  const T = TYPES[type];
+  fish.push({ type, T, x: x ?? POOL.x + 50 + Math.random() * (POOL.w - 100), y: y ?? POOL.y + 50 + Math.random() * (POOL.h - 100),
+    a: Math.random() * 6.28, sp: T.speed * (.6 + Math.random() * .4), turn: 0, ph: Math.random() * 9, scare: 0, size: T.size * (.85 + Math.random() * .35),
+    spots: Array.from({ length: 4 }, () => [Math.random() * 1.6 - .8, Math.random() * .8 - .4, .2 + Math.random() * .25, Math.random() < .5]) });
+}
+function hud() {
+  document.getElementById('hScore').textContent = score;
+  document.getElementById('hCount').textContent = caught.length;
+  document.getElementById('nets').textContent = '⭕'.repeat(Math.max(0, netsLeft)) + '❌'.repeat(NETS - netsLeft);
+  document.getElementById('dur').firstElementChild.style.width = Math.max(0, dur) + '%';
+}
+function setTip(s) { document.getElementById('tip').textContent = s; }
+function startGame() {
+  fish = []; ripples = []; fx = []; caught = []; t = 0; net = null; netsLeft = NETS; dur = 100; score = 0; bestFish = null;
+  for (let i = 0; i < 16; i++) addFish(rndType());
+  state = 'play'; document.getElementById('menu').hidden = true; document.getElementById('over').hidden = true; hud();
+  setTip('手握柄：網子在手指左上方，按住放進水裡');
+}
+
+/* 紙網操作 */
+const toLocal = e => { const r = cv.getBoundingClientRect(); return { x: (e.clientX - r.left) / r.width * W, y: (e.clientY - r.top) / r.height * H }; };
+const inPool = (x, y) => x > POOL.x + 8 && x < POOL.x + POOL.w - 8 && y > POOL.y + 8 && y < POOL.y + POOL.h - 8;
+let ptr = { x: 200, y: 560 }, pid = null;
+cv.addEventListener('pointerdown', e => {
+  initAudio(); if (state !== 'play' || pid !== null || broken > 0) return;
+  const q = toLocal(e); ptr = q;
+  const nx = q.x + OFF.x, ny = q.y + OFF.y;
+  if (!inPool(nx, ny)) return;
+  cv.setPointerCapture(e.pointerId); pid = e.pointerId;
+  net = { x: nx, y: ny, vx: 0, vy: 0, inWater: true, sp: 0 };
+  sSplash(); ripples.push({ x: nx, y: ny, r: 10, t: 1 });
+});
+cv.addEventListener('pointermove', e => {
+  const q = toLocal(e); ptr = q; ptr.mouse = e.pointerType === 'mouse';
+  if (e.pointerId !== pid || !net) return;
+  net.tx = Math.max(POOL.x + 10, Math.min(POOL.x + POOL.w - 10, q.x + OFF.x)); net.ty = Math.max(POOL.y + 10, Math.min(POOL.y + POOL.h - 10, q.y + OFF.y));
+});
+function lift(e) {
+  if (e.pointerId !== pid) return; pid = null;
+  if (!net || state !== 'play') { net = null; return; }
+  // 撈起：網子範圍內的魚
+  const got = fish.filter(f => Math.hypot(f.x - net.x, f.y - net.y) < NR - f.size * .25);
+  got.sort((a, b) => a.T.wt - b.T.wt);
+  let tore = false;
+  dur -= 3;
+  for (const f of got) {
+    const cost = f.T.wt * (f.size / f.T.size);
+    if (dur - cost <= 0) { tore = true; fx.push({ x: f.x, y: f.y - 20, t: 1, s: '逃走了！', col: '#ff8fab' }); break; }
+    dur -= cost;
+    fish = fish.filter(x => x !== f);
+    caught.push(f); score += f.T.pts; if (!bestFish || f.size > bestFish.size) bestFish = f;
+    fx.push({ x: f.x, y: f.y - 20, t: 1, s: `+${f.T.pts} ${f.T.name}`, col: f.type === 'gold' ? '#ffd60a' : '#fff' });
+    fx.push({ fly: f, x: f.x, y: f.y, t: .7 });
+  }
+  if (got.length && !tore) { sCatch(got.some(f => f.type === 'gold' || f.type === 'big')); setTip(got.length > 1 ? `一次撈到 ${got.length} 隻！` : '撈到了！'); }
+  else if (!got.length) { setTip('沒撈到…要等魚游到網子上面'); }
+  sPlop(); ripples.push({ x: net.x, y: net.y, r: 14, t: 1 });
+  for (let i = 0; i < 8; i++) fx.push({ drop: true, x: net.x + (Math.random() - .5) * 40, y: net.y, vx: (Math.random() - .5) * 60, vy: -80 - Math.random() * 60, t: .6 });
+  if (tore || dur <= 0) breakNet(); else { net.inWater = false; net.liftT = .35; }
+  if (score > best) { best = score; try { localStorage.setItem('goldfishBest', best); } catch (er) {} }
+  if (fish.length < 9) for (let i = 0; i < 4; i++) addFish(rndType(), POOL.x + 30, POOL.y + 30 + Math.random() * 100);
+  hud();
+}
+cv.addEventListener('pointerup', lift);
+cv.addEventListener('pointercancel', e => { if (e.pointerId === pid) { pid = null; net = null; } });
+function breakNet() {
+  sRip(); dur = 0; netsLeft--; broken = 1.1; hud();
+  if (net) { net.torn = true; net.inWater = false; }
+  setTip(netsLeft > 0 ? '紙破了！換下一支' : '最後一支也破了…');
+  setTimeout(() => {
+    net = null; broken = 0;
+    if (netsLeft <= 0) endGame(); else { dur = 100; hud(); setTip('新的紙網，慢慢來'); }
+  }, 1100);
+}
+function endGame() {
+  state = 'over';
+  const by = {}; caught.forEach(f => by[f.type] = (by[f.type] || 0) + 1);
+  document.getElementById('oTitle').textContent = score >= 400 ? '撈魚達人！🏆' : score >= 200 ? '手氣不錯！🎉' : score >= 80 ? '帶幾隻回家 🐟' : '老闆送你一隻 😅';
+  document.getElementById('catch').innerHTML = Object.keys(TYPES).map(k => `<div>${TYPES[k].name}<br><b>${by[k] || 0}</b> 隻</div>`).join('');
+  document.getElementById('oSub').innerHTML = `總分 <b style="color:#ffd166">${score}</b>　共 ${caught.length} 隻<br>${bestFish ? `最大條：${bestFish.T.name}（${Math.round(bestFish.size * .45)} 公分）<br>` : ''}最高分 ${best}`;
+  setTimeout(() => document.getElementById('over').hidden = false, 300);
+}
+document.getElementById('start').onclick = () => { initAudio(); startGame(); };
+document.getElementById('again').onclick = () => { initAudio(); startGame(); };
+
+/* 更新 */
+function update(dt) {
+  t += dt;
+  ripples.forEach(r => { r.t -= dt * .8; r.r += dt * 50; }); ripples = ripples.filter(r => r.t > 0);
+  fx.forEach(f => { f.t -= dt; if (f.drop) { f.x += f.vx * dt; f.y += f.vy * dt; f.vy += 400 * dt; } }); fx = fx.filter(f => f.t > 0);
+  if (broken > 0) broken -= dt;
+  // 網子跟手（有一點水的阻力）
+  if (net && net.inWater) {
+    if (net.tx !== undefined) { const nx = net.x + (net.tx - net.x) * Math.min(1, dt * 14), ny = net.y + (net.ty - net.y) * Math.min(1, dt * 14); net.vx = (nx - net.x) / dt; net.vy = (ny - net.y) / dt; net.x = nx; net.y = ny; }
+    net.sp = Math.hypot(net.vx, net.vy);
+    if (state === 'play') {
+      dur -= dt * (2.2 + net.sp * .028);
+      if (net.sp > 120 && Math.random() < dt * 8) ripples.push({ x: net.x, y: net.y, r: 8, t: .6 });
+      if (dur <= 0) { pid = null; breakNet(); }
+      hud();
+    }
+  } else if (net && net.liftT !== undefined) { net.liftT -= dt; if (net.liftT <= 0) net = null; }
+  // 魚
+  for (const f of fish) {
+    f.ph += dt * (6 + f.sp / 15);
+    // 漫遊
+    if (Math.random() < dt * .8) f.turn = (Math.random() - .5) * 2.4;
+    let desired = f.a + f.turn * dt * 2;
+    // 避開池邊
+    const m = 40;
+    const cx = POOL.x + POOL.w / 2, cy = POOL.y + POOL.h / 2;
+    if (f.x < POOL.x + m || f.x > POOL.x + POOL.w - m || f.y < POOL.y + m || f.y > POOL.y + POOL.h - m) {
+      const ta = Math.atan2(cy - f.y, cx - f.x); let d = ta - f.a; d = Math.atan2(Math.sin(d), Math.cos(d)); desired = f.a + d * Math.min(1, dt * 4);
+    }
+    // 被網子嚇到：網子快速移動、或從魚頭前方靠近
+    f.scare = Math.max(0, f.scare - dt);
+    if (net && net.inWater) {
+      const dx = f.x - net.x, dy = f.y - net.y, d = Math.hypot(dx, dy);
+      const front = Math.cos(Math.atan2(-dy, -dx) - f.a) > .5;     // 網子在魚的前方
+      if (d < 95 && (net.sp > 170 || (front && d < 70 && net.sp > 60))) { f.scare = .9; desired = Math.atan2(dy, dx) + (Math.random() - .5) * .6; }
+    }
+    let d = desired - f.a; d = Math.atan2(Math.sin(d), Math.cos(d)); f.a += d * (f.scare > 0 ? 1 : .9);
+    const sp = f.sp * (f.scare > 0 ? 3 : 1) * (.8 + .3 * Math.sin(f.ph * .3));
+    f.x += Math.cos(f.a) * sp * dt; f.y += Math.sin(f.a) * sp * dt;
+    f.x = Math.max(POOL.x + 12, Math.min(POOL.x + POOL.w - 12, f.x)); f.y = Math.max(POOL.y + 12, Math.min(POOL.y + POOL.h - 12, f.y));
+  }
+  // 魚彼此推開
+  for (let i = 0; i < fish.length; i++) for (let j = i + 1; j < fish.length; j++) {
+    const a = fish[i], b = fish[j], dx = b.x - a.x, dy = b.y - a.y, d = Math.hypot(dx, dy), mn = (a.size + b.size) * .8;
+    if (d < mn && d > 0) { const k = (mn - d) / 2 / d; a.x -= dx * k; a.y -= dy * k; b.x += dx * k; b.y += dy * k; }
+  }
+}
+
+/* 繪圖 */
+function drawFish(f, x, y, a, sc = 1, alpha = 1) {
+  const s = f.size * sc, wig = Math.sin(f.ph) * .35;
+  ctx.save(); ctx.globalAlpha = alpha; ctx.translate(x, y); ctx.rotate(a);
+  const col = { red: '#f3722c', black: '#1f1d2b', big: '#fff4e6', gold: '#ffd60a' }[f.type];
+  const fin = { red: 'rgba(255,140,80,.75)', black: 'rgba(40,40,60,.75)', big: 'rgba(255,200,170,.7)', gold: 'rgba(255,230,120,.8)' }[f.type];
+  // 影子
+  ctx.fillStyle = 'rgba(0,30,60,.18)'; ctx.beginPath(); ctx.ellipse(4, 5, s * .9, s * .45, 0, 0, 7); ctx.fill();
+  // 尾巴
+  ctx.save(); ctx.translate(-s * .75, 0); ctx.rotate(wig);
+  ctx.fillStyle = fin; ctx.beginPath(); ctx.moveTo(0, 0); ctx.quadraticCurveTo(-s * .7, -s * .9, -s * 1.2, -s * .55); ctx.quadraticCurveTo(-s * .8, 0, -s * 1.2, s * .55); ctx.quadraticCurveTo(-s * .7, s * .9, 0, 0); ctx.fill();
+  ctx.restore();
+  // 胸鰭
+  ctx.fillStyle = fin;
+  ctx.beginPath(); ctx.ellipse(s * .1, -s * .45, s * .3, s * .14, -.7 + wig * .5, 0, 7); ctx.fill();
+  ctx.beginPath(); ctx.ellipse(s * .1, s * .45, s * .3, s * .14, .7 - wig * .5, 0, 7); ctx.fill();
+  // 身體
+  const g = ctx.createRadialGradient(s * .2, -s * .15, s * .1, 0, 0, s);
+  g.addColorStop(0, f.type === 'black' ? '#3d3a52' : '#fff'); g.addColorStop(.35, col); g.addColorStop(1, col);
+  ctx.fillStyle = g; ctx.beginPath(); ctx.ellipse(0, 0, s * .85, s * .42, 0, 0, 7); ctx.fill();
+  if (f.type === 'big') { for (const [sx, sy, r, dark] of f.spots) { ctx.fillStyle = dark ? '#1f1d2b' : '#f3722c'; ctx.beginPath(); ctx.arc(sx * s * .6, sy * s * .5, r * s * .5, 0, 7); ctx.fill(); } }
+  if (f.type === 'gold') { ctx.fillStyle = `rgba(255,255,255,${.4 + .4 * Math.sin(t * 8 + f.ph)})`; ctx.beginPath(); ctx.ellipse(s * .1, -s * .1, s * .35, s * .1, 0, 0, 7); ctx.fill(); }
+  // 眼睛
+  const er = f.type === 'black' ? s * .17 : s * .09, ex = s * .5, ey = f.type === 'black' ? s * .3 : s * .2;
+  for (const sgn of [-1, 1]) { ctx.fillStyle = f.type === 'black' ? '#55536b' : '#fff'; ctx.beginPath(); ctx.arc(ex, sgn * ey, er, 0, 7); ctx.fill(); ctx.fillStyle = '#111'; ctx.beginPath(); ctx.arc(ex + er * .2, sgn * ey, er * .55, 0, 7); ctx.fill(); }
+  ctx.restore();
+}
+function drawPaper(n, under) {
+  const a = Math.max(0, dur) / 100;
+  ctx.save(); ctx.translate(n.x, n.y);
+  if (!n.torn) {
+    ctx.fillStyle = under ? `rgba(255,255,255,${.12 + a * .18})` : `rgba(255,255,255,${.35 + a * .45})`;
+    ctx.beginPath(); ctx.arc(0, 0, NR, 0, 7); ctx.fill();
+    if (a < .6) { ctx.strokeStyle = `rgba(120,140,160,${(.6 - a) * 1.2})`; ctx.lineWidth = 1; for (let i = 0; i < 5; i++) { const an = i * 1.3 + .4; ctx.beginPath(); ctx.moveTo(Math.cos(an) * 6, Math.sin(an) * 6); ctx.lineTo(Math.cos(an + .2) * NR * .9, Math.sin(an + .2) * NR * .9); ctx.stroke(); } }
+  } else {
+    ctx.fillStyle = 'rgba(255,255,255,.55)';
+    for (let i = 0; i < 7; i++) { const a0 = i / 7 * 6.28, a1 = a0 + .6; ctx.beginPath(); ctx.moveTo(Math.cos(a0) * NR, Math.sin(a0) * NR); ctx.lineTo(Math.cos((a0 + a1) / 2) * NR * .55, Math.sin((a0 + a1) / 2) * NR * .55); ctx.lineTo(Math.cos(a1) * NR, Math.sin(a1) * NR); ctx.closePath(); ctx.fill(); }
+  }
+  ctx.restore();
+}
+function drawFrame(n, lifted) {
+  ctx.save(); ctx.translate(n.x, n.y - (lifted ? 6 : 0));
+  // 把手（從框延伸到手握的位置）
+  const hx = -OFF.x, hy = -OFF.y, L = Math.hypot(hx, hy), ux = hx / L, uy = hy / L;
+  ctx.strokeStyle = '#e63946'; ctx.lineWidth = 9; ctx.lineCap = 'round';
+  ctx.beginPath(); ctx.moveTo(ux * NR, uy * NR); ctx.lineTo(hx + ux * 22, hy + uy * 22); ctx.stroke();
+  ctx.strokeStyle = '#fff'; ctx.lineWidth = 3; ctx.beginPath(); ctx.moveTo(ux * (NR + 12), uy * (NR + 12)); ctx.lineTo(ux * (NR + 30), uy * (NR + 30)); ctx.stroke();
+  // 握著柄的手
+  ctx.save(); ctx.translate(hx, hy); ctx.rotate(Math.atan2(uy, ux));
+  ctx.fillStyle = '#f6c9a0'; ctx.strokeStyle = '#c98b62'; ctx.lineWidth = 1.5;
+  ctx.beginPath(); ctx.ellipse(6, 0, 20, 14, 0, 0, 7); ctx.fill(); ctx.stroke();               // 手掌
+  for (let i = 0; i < 4; i++) { ctx.beginPath(); ctx.ellipse(-4 + i * 7, -11, 4, 6, 0, 0, 7); ctx.fill(); ctx.stroke(); }  // 握住的手指
+  ctx.beginPath(); ctx.ellipse(-8, 8, 8, 4.5, -.5, 0, 7); ctx.fill(); ctx.stroke();            // 大拇指
+  ctx.fillStyle = '#f6c9a0'; ctx.fillRect(22, -12, 30, 24);                                   // 手腕
+  ctx.restore();
+  // 框
+  ctx.strokeStyle = '#e63946'; ctx.lineWidth = 6; ctx.beginPath(); ctx.arc(0, 0, NR + 2, 0, 7); ctx.stroke();
+  ctx.strokeStyle = '#ff8fa3'; ctx.lineWidth = 2; ctx.beginPath(); ctx.arc(-1, -1, NR + 2, 3.6, 5); ctx.stroke();
+  ctx.restore();
+}
+function draw() {
+  ctx.setTransform(scale, 0, 0, scale, 0, 0);
+  // 攤位背景
+  ctx.fillStyle = '#3b2c4a'; ctx.fillRect(0, 0, W, H);
+  for (let i = 0; i < 12; i++) { ctx.fillStyle = i % 2 ? '#e63946' : '#f1faee'; ctx.fillRect(i * 34, H - 106, 34, 6); }
+  // 水池
+  ctx.fillStyle = '#0d3b66'; ctx.beginPath(); ctx.roundRect(POOL.x - 8, POOL.y - 8, POOL.w + 16, POOL.h + 16, POOL.r + 6); ctx.fill();
+  ctx.save(); ctx.beginPath(); ctx.roundRect(POOL.x, POOL.y, POOL.w, POOL.h, POOL.r); ctx.clip();
+  const wg = ctx.createLinearGradient(0, POOL.y, 0, POOL.y + POOL.h); wg.addColorStop(0, '#48cae4'); wg.addColorStop(1, '#0096c7');
+  ctx.fillStyle = wg; ctx.fillRect(POOL.x, POOL.y, POOL.w, POOL.h);
+  // 水波光
+  ctx.strokeStyle = 'rgba(255,255,255,.13)'; ctx.lineWidth = 2;
+  for (let k = 0; k < 14; k++) { ctx.beginPath(); for (let x = POOL.x; x <= POOL.x + POOL.w; x += 10) { const y = POOL.y + 20 + k * 36 + Math.sin(x / 30 + t * 1.2 + k) * 6 + Math.sin(x / 13 - t * 2 + k * 2) * 3; x === POOL.x ? ctx.moveTo(x, y) : ctx.lineTo(x, y); } ctx.stroke(); }
+  if (net && net.inWater) drawPaper(net, true);
+  for (const f of fish) drawFish(f, f.x, f.y, f.a);
+  for (const r of ripples) { ctx.strokeStyle = `rgba(255,255,255,${r.t * .5})`; ctx.lineWidth = 2; ctx.beginPath(); ctx.arc(r.x, r.y, r.r, 0, 7); ctx.stroke(); }
+  ctx.restore();
+  // 撈起來的魚飛向碗
+  for (const f of fx) if (f.fly) { const k = 1 - f.t / .7, x = f.x + (BOWL.x - f.x) * k, y = f.y + (BOWL.y - f.y) * k - Math.sin(k * Math.PI) * 80; drawFish(f.fly, x, y, f.fly.a + k * 6, 1 - k * .4); }
+  if (net && !net.inWater) { drawPaper(net, false); drawFrame(net, true); }
+  else if (net) drawFrame(net, false);
+  // 碗
+  ctx.fillStyle = 'rgba(200,230,255,.35)'; ctx.beginPath(); ctx.ellipse(BOWL.x, BOWL.y, BOWL.r, BOWL.r * .72, 0, 0, 7); ctx.fill();
+  ctx.strokeStyle = 'rgba(255,255,255,.7)'; ctx.lineWidth = 3; ctx.stroke();
+  ctx.save(); ctx.beginPath(); ctx.ellipse(BOWL.x, BOWL.y, BOWL.r - 4, BOWL.r * .72 - 4, 0, 0, 7); ctx.clip();
+  ctx.fillStyle = 'rgba(72,202,228,.55)'; ctx.fillRect(BOWL.x - BOWL.r, BOWL.y - BOWL.r, BOWL.r * 2, BOWL.r * 2);
+  caught.slice(-10).forEach((f, i) => { const a = t * .8 + i * 1.7, rr = 10 + (i % 3) * 8; drawFish(f, BOWL.x + Math.cos(a) * rr * 1.3, BOWL.y + Math.sin(a) * rr * .7, a + Math.PI / 2, .55); });
+  ctx.restore();
+  ctx.fillStyle = '#ffd166'; ctx.font = '700 12px system-ui'; ctx.textAlign = 'center'; ctx.fillText(`我的碗 ×${caught.length}`, BOWL.x, BOWL.y + BOWL.r * .72 + 16);
+  // 招牌
+  ctx.fillStyle = '#ffbf69'; ctx.font = '900 22px "PingFang TC","Noto Sans TC",system-ui'; ctx.textAlign = 'left'; ctx.fillText('撈金魚', 26, 572);
+  ctx.font = '600 12px system-ui'; ctx.fillStyle = '#fff6e5aa'; ctx.fillText('一支網 3 次機會', 26, 594);
+  // 浮字與水滴
+  for (const f of fx) {
+    if (f.drop) { ctx.fillStyle = `rgba(200,240,255,${f.t})`; ctx.beginPath(); ctx.arc(f.x, f.y, 2.5, 0, 7); ctx.fill(); }
+    else if (f.s) { ctx.globalAlpha = Math.min(1, f.t * 2); ctx.font = '900 15px system-ui'; ctx.textAlign = 'center'; ctx.lineWidth = 4; ctx.strokeStyle = '#023e8a'; ctx.strokeText(f.s, f.x, f.y - (1 - f.t) * 22); ctx.fillStyle = f.col; ctx.fillText(f.s, f.x, f.y - (1 - f.t) * 22); ctx.globalAlpha = 1; }
+  }
+  // 手上沒放網時的提示圈
+  if (state === 'play' && ptr.mouse && !net && broken <= 0 && inPool(ptr.x + OFF.x, ptr.y + OFF.y)) { ctx.strokeStyle = 'rgba(255,255,255,.35)'; ctx.setLineDash([5, 5]); ctx.lineWidth = 2; ctx.beginPath(); ctx.arc(ptr.x + OFF.x, ptr.y + OFF.y, NR, 0, 7); ctx.stroke(); ctx.setLineDash([]); }
+}
+
+let last = performance.now();
+function loop(now) { const dt = Math.min(.033, (now - last) / 1000); last = now; update(dt); draw(); requestAnimationFrame(loop); }
+for (let i = 0; i < 16; i++) addFish(rndType());
+hud(); requestAnimationFrame(loop);
+window.__gf = { get fish() { return fish; }, get state() { return state; }, get score() { return score; }, get caught() { return caught; }, get dur() { return dur; }, get netsLeft() { return netsLeft; }, startGame };
+})();
+</script>
+</body>
+</html>

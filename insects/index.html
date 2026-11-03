@@ -1,0 +1,478 @@
+<!DOCTYPE html>
+<html lang="zh-Hant">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1,maximum-scale=1,user-scalable=no">
+<title>野外抓昆蟲</title>
+<style>
+  html,body{margin:0;height:100%;background:#14261b;color:#f0fdf4;font-family:system-ui,-apple-system,"PingFang TC","Noto Sans TC",sans-serif;overflow:hidden;touch-action:none;user-select:none;-webkit-user-select:none}
+  #app{max-width:520px;margin:0 auto;height:100%;display:flex;flex-direction:column}
+  #hud{display:flex;justify-content:space-between;align-items:center;padding:8px 12px 2px;font-size:11px}
+  #hud b{display:block;font-size:19px;color:#fde047;font-variant-numeric:tabular-nums}
+  #tip{text-align:center;font-size:13px;height:18px;color:#fde047}
+  #wrap{position:relative;flex:1;min-height:0;display:flex;justify-content:center;align-items:center}
+  canvas{display:block;touch-action:none;border-radius:12px}
+  #ctrl{display:flex;gap:8px;padding:6px 12px 14px}
+  #ctrl button{flex:1;border:2px solid #ffffff22;border-radius:12px;font-size:16px;font-weight:800;color:#f0fdf4;background:#1f3d2b;padding:11px 4px}
+  #ctrl button.on{border-color:#fde047;background:#2f5d3f}
+  .ov{position:absolute;inset:0;display:flex;align-items:center;justify-content:center;z-index:5}
+  .box{background:#132b1df2;border:2px solid #86efac;border-radius:16px;padding:18px;width:min(330px,90%);text-align:center;max-height:92%;overflow:auto}
+  .box h2{margin:0 0 6px;font-size:26px;color:#86efac}
+  .box p{font-size:13px;line-height:1.7;margin:6px 0 10px;text-align:left}
+  .scene{display:flex;align-items:center;gap:10px;width:100%;background:#1f3d2b;border:2px solid #ffffff1a;color:#f0fdf4;border-radius:12px;padding:10px;margin:6px 0;text-align:left;font-size:13px}
+  .scene b{font-size:17px;display:block}
+  .scene span.e{font-size:30px}
+  .scene small{opacity:.75}
+  .btn{width:100%;background:#16a34a;color:#fff;border:0;border-radius:12px;padding:12px;font-size:16px;font-weight:800;margin-top:6px}
+  .btn.sec{background:#334155}
+  .card{background:linear-gradient(#f7fee7,#d9f99d);color:#1a2e05;border-radius:14px;padding:12px;margin:6px 0 10px;position:relative}
+  .card .rar{font-size:12px;font-weight:800;letter-spacing:2px}
+  .card .nm{font-size:24px;font-weight:900;margin:2px 0}
+  .card .new{position:absolute;top:8px;right:10px;background:#dc2626;color:#fff;font-size:12px;font-weight:900;border-radius:8px;padding:2px 7px}
+  .card canvas{width:100%;height:130px}
+  .card .fact{font-size:13px;line-height:1.6;text-align:left;background:#ffffff88;border-radius:8px;padding:6px 8px;margin-top:6px}
+  .stats{display:grid;grid-template-columns:1fr 1fr;gap:6px;margin:8px 0 10px}
+  .stats div{background:#0005;border-radius:10px;padding:7px;font-size:11px}
+  .stats b{display:block;font-size:17px;color:#fde047}
+  #dexOv{background:#000a}
+  .box.dex{background:#132b1d}
+  .dex h3{margin:10px 0 4px;font-size:15px;text-align:left;color:#86efac}
+  .dexgrid{display:grid;grid-template-columns:1fr 1fr 1fr;gap:6px}
+  .dexgrid div{background:#0005;border-radius:10px;padding:5px;font-size:11px;line-height:1.35}
+  .dexgrid canvas{width:100%;height:56px}
+  [hidden]{display:none!important}
+</style>
+</head>
+<body>
+<div id="app">
+  <div id="hud">
+    <div>地點<b id="hScene">—</b></div>
+    <div>時間<b id="hTime">2:00</b></div>
+    <div>分數<b id="hScore">0</b></div>
+    <div style="text-align:right">抓到<b id="hCount">0</b></div>
+  </div>
+  <div id="tip"></div>
+  <div id="wrap">
+    <canvas id="c"></canvas>
+    <div class="ov" id="menu"><div class="box">
+      <h2>🦋 野外抓昆蟲</h2>
+      <p style="text-align:center;margin-bottom:4px">選一個地點，每趟 2 分鐘</p>
+      <button class="scene" data-s="forest"><span class="e">🌳</span><div><b>樹林</b><small>獨角仙、鍬形蟲、蟬・傳說：長臂金龜</small><br><small id="b_forest"></small></div></button>
+      <button class="scene" data-s="flower"><span class="e">🌼</span><div><b>花田</b><small>紋白蝶、瓢蟲、蚱蜢・傳說：大紫蛺蝶</small><br><small id="b_flower"></small></div></button>
+      <button class="scene" data-s="stream"><span class="e">💧</span><div><b>溪邊黃昏</b><small>蜻蜓、豆娘、螢火蟲・稀有：無霸勾蜓</small><br><small id="b_stream"></small></div></button>
+      <button class="btn sec" id="dexBtn">📖 昆蟲圖鑑</button>
+      <p style="font-size:12px;opacity:.85">玩法：<b>按住畫面</b>拿出工具，<b>慢慢移動</b>靠近昆蟲，對準後<b>放開</b>就抓！動作太快昆蟲會跑掉。<br>🥅 網子抓會飛的・✋ 手抓停著的・🐝 蜂類不要抓，會被叮扣時間！</p>
+    </div></div>
+    <div class="ov" id="catchOv" hidden><div class="box"><div class="card" id="card"></div><button class="btn" id="cardOk">繼續抓</button></div></div>
+    <div class="ov" id="dexOv" hidden><div class="box dex"><h2>📖 昆蟲圖鑑</h2><div id="dexBody"></div><button class="btn sec" id="dexClose">關閉</button></div></div>
+    <div class="ov" id="over" hidden><div class="box">
+      <h2 id="oTitle"></h2><div class="stats" id="oStats"></div>
+      <button class="btn" id="release">🍃 全部放生</button>
+      <button class="btn sec" id="again">再來一趟</button>
+      <button class="btn sec" id="toMenu">換地點</button>
+    </div></div>
+  </div>
+  <div id="ctrl">
+    <button id="tNet" class="on">🥅 網子（抓會飛的）</button>
+    <button id="tHand">✋ 手（抓停著的）</button>
+  </div>
+</div>
+<script>
+(() => {
+const $ = id => document.getElementById(id);
+const W = 400, H = 600, GAME_T = 120, OFF = 70;
+const cv = $('c'), ctx = cv.getContext('2d');
+let scale = 1;
+function resize() {
+  const wr = $('wrap').getBoundingClientRect();
+  const s = Math.min((wr.width - 4) / W, (wr.height - 4) / H), d = window.devicePixelRatio || 1;
+  cv.style.width = W * s + 'px'; cv.style.height = H * s + 'px';
+  cv.width = Math.round(W * s * d); cv.height = Math.round(H * s * d); scale = s * d;
+}
+addEventListener('resize', resize);
+
+/* ---------- 昆蟲資料 ---------- */
+const RAR = [{ n: '普通', c: '#64748b', p: 10, w: 50 }, { n: '少見', c: '#16a34a', p: 30, w: 24 }, { n: '稀有', c: '#2563eb', p: 80, w: 9 }, { n: '傳說', c: '#d97706', p: 250, w: 2.5 }];
+// mode: fly 會飛（用網子）, perch 停著（用手）; kind: 畫法
+const BUGS = {
+  forest: [
+    { id: 'cicada', n: '蟬', r: 0, mode: 'perch', kind: 'cicada', mm: [30, 45], col: '#5b4a2e', fact: '公蟬靠腹部的發音器鳴叫，母蟬不會叫。' },
+    { id: 'stick', n: '竹節蟲', r: 1, mode: 'perch', kind: 'stick', mm: [70, 120], col: '#7a8b4a', fact: '偽裝成樹枝，被碰到時會裝死不動。' },
+    { id: 'rhino', n: '獨角仙', r: 1, mode: 'perch', kind: 'rhino', mm: [40, 70], col: '#4a2a16', fact: '只有公的頭上有長角，力氣可以拉動自己體重好幾十倍的東西。' },
+    { id: 'stag', n: '鍬形蟲', r: 2, mode: 'perch', kind: 'stag', mm: [35, 70], col: '#2a1a10', fact: '大大的「大顎」是公蟲用來打架搶地盤的武器。' },
+    { id: 'longarm', n: '長臂金龜', r: 3, mode: 'perch', kind: 'longarm', mm: [55, 75], col: '#3f5a2a', fact: '前腳特別長，是台灣的保育類昆蟲，看到要記得放生。' },
+    { id: 'hornet', n: '虎頭蜂', danger: true, mode: 'fly', kind: 'bee', mm: [30, 40], col: '#e8a317', fact: '' },
+  ],
+  flower: [
+    { id: 'whitebutterfly', n: '紋白蝶', r: 0, mode: 'fly', kind: 'butterfly', mm: [40, 50], col: '#f8fafc', col2: '#1f2937', fact: '幼蟲愛吃高麗菜，是菜園常見的蝴蝶。' },
+    { id: 'ladybug', n: '瓢蟲', r: 0, mode: 'perch', kind: 'ladybug', mm: [6, 9], col: '#dc2626', fact: '很多瓢蟲會吃蚜蟲，是農夫的好幫手。' },
+    { id: 'grasshopper', n: '蚱蜢', r: 0, mode: 'perch', kind: 'hopper', mm: [30, 55], col: '#65a30d', fact: '後腳很發達，一跳可以跳出身長好幾十倍遠。' },
+    { id: 'swallowtail', n: '大鳳蝶', r: 1, mode: 'fly', kind: 'butterfly', mm: [110, 140], col: '#111827', col2: '#dc2626', tail: true, fact: '翅膀很大，後翅有像尾巴的突起，飛起來很優雅。' },
+    { id: 'purpleemperor', n: '大紫蛺蝶', r: 3, mode: 'fly', kind: 'butterfly', mm: [80, 110], col: '#4c1d95', col2: '#a78bfa', shine: true, fact: '翅膀在陽光下會閃出紫色光澤，非常少見。' },
+    { id: 'bee', n: '蜜蜂', danger: true, mode: 'fly', kind: 'bee', mm: [12, 15], col: '#f5b014', fact: '' },
+  ],
+  stream: [
+    { id: 'dragonfly', n: '蜻蜓', r: 0, mode: 'fly', kind: 'dragon', mm: [40, 55], col: '#dc2626', fact: '複眼由上萬個小眼組成，飛行時可以急停、倒退。' },
+    { id: 'damselfly', n: '豆娘', r: 0, mode: 'fly', kind: 'damsel', mm: [30, 45], col: '#0ea5e9', fact: '停下來時翅膀會合起來豎在背上，和蜻蜓不一樣。' },
+    { id: 'strider', n: '水黽', r: 1, mode: 'perch', kind: 'strider', mm: [15, 25], col: '#3f3f46', water: true, fact: '腳上有細毛，可以靠水的表面張力站在水面上。' },
+    { id: 'firefly', n: '螢火蟲', r: 1, mode: 'fly', kind: 'firefly', mm: [8, 15], col: '#1f2937', fact: '尾巴會發出冷光，用閃光的節奏來找對象。' },
+    { id: 'giantdragon', n: '無霸勾蜓', r: 2, mode: 'fly', kind: 'dragon', mm: [95, 110], col: '#1f2937', col2: '#facc15', big: true, fact: '台灣體型最大的蜻蜓之一，黑底黃斑非常帥氣。' },
+    { id: 'wasp', n: '長腳蜂', danger: true, mode: 'fly', kind: 'bee', mm: [18, 25], col: '#c2410c', fact: '' },
+  ],
+};
+const SCENES = { forest: '樹林', flower: '花田', stream: '溪邊黃昏' };
+const ALL = Object.values(BUGS).flat().filter(b => !b.danger);
+
+/* ---------- 停棲點 ---------- */
+const PERCH = {
+  forest: [[70, 260], [80, 380], [190, 230], [200, 340], [310, 280], [320, 420], [105, 180], [285, 170], [60, 470], [340, 500]],
+  flower: [[60, 470], [140, 500], [230, 485], [320, 470], [100, 430], [260, 440], [180, 455], [360, 520], [40, 530], [300, 545]],
+  stream: [[90, 470], [160, 500], [240, 480], [320, 510], [200, 530], [60, 520]],
+};
+
+/* ---------- 紀錄 ---------- */
+let dex = {}, bests = {};
+try { dex = JSON.parse(localStorage.getItem('bugDex') || '{}'); bests = JSON.parse(localStorage.getItem('bugBest') || '{}'); } catch (e) {}
+const saveRec = () => { try { localStorage.setItem('bugDex', JSON.stringify(dex)); localStorage.setItem('bugBest', JSON.stringify(bests)); } catch (e) {} };
+function menuBests() { for (const k in SCENES) $('b_' + k).textContent = `最高分 ${bests[k] || 0}`; }
+
+/* ---------- 音效 ---------- */
+let ac = null;
+function initAudio() { if (!ac) { try { ac = new (window.AudioContext || window.webkitAudioContext)(); } catch (e) {} } else if (ac.state === 'suspended') ac.resume(); }
+function tone(f, d, type = 'sine', v = .06, f2, delay = 0) { if (!ac) return; const t = ac.currentTime + delay, o = ac.createOscillator(), g = ac.createGain(); o.type = type; o.frequency.setValueAtTime(f, t); if (f2) o.frequency.exponentialRampToValueAtTime(f2, t + d); g.gain.setValueAtTime(v, t); g.gain.exponentialRampToValueAtTime(.0001, t + d); o.connect(g).connect(ac.destination); o.start(t); o.stop(t + d + .02); }
+function noise(d, v, lp) { if (!ac) return; const n = ac.sampleRate * d, b = ac.createBuffer(1, n, ac.sampleRate), x = b.getChannelData(0); for (let i = 0; i < n; i++) x[i] = (Math.random() * 2 - 1) * Math.pow(1 - i / n, 2); const s = ac.createBufferSource(), f = ac.createBiquadFilter(), g = ac.createGain(); s.buffer = b; f.type = 'lowpass'; f.frequency.value = lp; g.gain.value = v; s.connect(f).connect(g).connect(ac.destination); s.start(); }
+const sSwoosh = () => noise(.18, .25, 2500);
+const sCatch = r => (r >= 2 ? [523, 659, 784, 1047, 1319] : [660, 880, 1100]).forEach((f, i) => tone(f, .14, 'sine', .07, null, i * .08));
+const sMiss = () => tone(500, .15, 'triangle', .04, 300);
+const sSting = () => { tone(900, .4, 'sawtooth', .06, 300); noise(.2, .3, 3000); };
+const vib = ms => { try { navigator.vibrate && navigator.vibrate(ms); } catch (e) {} };
+
+/* ---------- 狀態 ---------- */
+let scene = 'forest', state = 'menu', t = 0, bugs = [], caught = [], fx = [], score = 0, tool = 'net', paused = false, spawnT = 0, cicadaT = 0;
+let ptr = null;   // 按住中的工具 {x,y,px,py,sp}
+function setTip(s) { $('tip').textContent = s; }
+const fmt = s => `${(s / 60) | 0}:${String(Math.floor(s % 60)).padStart(2, '0')}`;
+function hud() { $('hScene').textContent = state === 'menu' ? '—' : SCENES[scene]; $('hTime').textContent = fmt(Math.max(0, GAME_T - t)); $('hScore').textContent = score; $('hCount').textContent = caught.length; }
+function setTool(tl) { tool = tl; $('tNet').classList.toggle('on', tl === 'net'); $('tHand').classList.toggle('on', tl === 'hand'); }
+$('tNet').onclick = () => setTool('net'); $('tHand').onclick = () => setTool('hand');
+
+function pickSpecies() {
+  const list = BUGS[scene], wts = list.map(b => b.danger ? 12 : RAR[b.r].w), tot = wts.reduce((a, b) => a + b, 0);
+  let r = Math.random() * tot; for (let i = 0; i < list.length; i++) { r -= wts[i]; if (r <= 0) return list[i]; } return list[0];
+}
+function freePerch() {
+  const ps = PERCH[scene].filter(([x, y]) => !bugs.some(b => b.mode === 'perch' && Math.hypot(b.px - x, b.py - y) < 20));
+  return ps.length ? ps[(Math.random() * ps.length) | 0] : null;
+}
+function spawn() {
+  const sp = pickSpecies(), mm = Math.round(sp.mm[0] + (sp.mm[1] - sp.mm[0]) * Math.pow(Math.random(), 1.6));
+  const b = { sp, mm, mode: sp.mode, ph: Math.random() * 9, life: 14 + Math.random() * 14, age: 0, flee: 0, gone: false, leaving: false };
+  if (sp.mode === 'perch') { const p = freePerch(); if (!p) return; b.px = p[0]; b.py = p[1]; b.x = p[0]; b.y = p[1] - 120; b.landing = 1; b.ang = -Math.PI / 2 + (Math.random() - .5) * .6; }
+  else { const left = Math.random() < .5; b.x = left ? -30 : W + 30; b.y = 80 + Math.random() * 300; b.vx = 0; b.vy = 0; b.tx = 60 + Math.random() * 280; b.ty = 80 + Math.random() * 320; b.ang = 0; }
+  bugs.push(b);
+}
+function startTrip(sc) {
+  scene = sc; state = 'play'; t = 0; bugs = []; caught = []; fx = []; score = 0; paused = false; spawnT = 0; ptr = null;
+  for (let i = 0; i < 5; i++) spawn();
+  setTool(BUGS[sc].some(b => b.mode === 'perch' && !b.danger) && sc === 'forest' ? 'hand' : 'net');
+  $('menu').hidden = true; $('over').hidden = true;
+  setTip(sc === 'forest' ? '樹林的甲蟲停在樹上，用 ✋ 手慢慢靠近抓' : sc === 'flower' ? '蝴蝶用 🥅 網子，瓢蟲和蚱蜢用 ✋ 手' : '天快黑了，螢火蟲會發光；水黽在水面要用手');
+  hud();
+}
+
+/* ---------- 操作 ---------- */
+const toLocal = e => { const r = cv.getBoundingClientRect(); return { x: (e.clientX - r.left) / r.width * W, y: (e.clientY - r.top) / r.height * H }; };
+let pid = null;
+cv.addEventListener('pointerdown', e => {
+  initAudio(); if (state !== 'play' || paused || pid !== null) return;
+  try { cv.setPointerCapture(e.pointerId); } catch (er) {} pid = e.pointerId;
+  const q = toLocal(e); ptr = { x: q.x, y: q.y - OFF, px: q.x, py: q.y - OFF, sp: 0, last: performance.now() };
+});
+cv.addEventListener('pointermove', e => {
+  if (e.pointerId !== pid || !ptr) return;
+  const q = toLocal(e), now = performance.now(), dt = Math.max(.008, (now - ptr.last) / 1000);
+  const nx = q.x, ny = q.y - OFF, sp = Math.hypot(nx - ptr.x, ny - ptr.y) / dt;
+  ptr.sp = ptr.sp * .7 + sp * .3; ptr.x = nx; ptr.y = ny; ptr.last = now;
+});
+cv.addEventListener('pointerup', e => { if (e.pointerId !== pid) return; pid = null; if (ptr && state === 'play' && !paused) attempt(); ptr = null; });
+cv.addEventListener('pointercancel', e => { if (e.pointerId === pid) { pid = null; ptr = null; } });
+
+function attempt() {
+  const R = tool === 'net' ? 34 : 22;
+  const target = bugs.filter(b => !b.leaving && !b.landing).map(b => ({ b, d: Math.hypot(b.x - ptr.x, b.y - ptr.y) })).filter(o => o.d < R + bugSize(o.b) * .35).sort((a, b) => a.d - b.d)[0];
+  sSwoosh(); fx.push({ swing: tool, x: ptr.x, y: ptr.y, t: .3 });
+  if (!target) { sMiss(); setTip('沒抓到…對準了再放開'); return; }
+  const b = target.b;
+  if (ptr.sp > (tool === 'net' ? 650 : 420)) { startle(b, '動作太大，嚇跑了！'); return; }
+  if (b.sp.danger) {   // 被叮
+    b.leaving = true; b.flee = 2; t += 10; sSting(); vib([80, 50, 120]);
+    fx.push({ sting: 1, t: .8 }); fx.push({ x: b.x, y: b.y - 24, t: 1.4, s: `被${b.sp.n}叮了！-10 秒`, col: '#ef4444' }); setTip('🐝 蜂類不要抓！'); hud(); return;
+  }
+  if (tool === 'net' && b.mode === 'perch') { startle(b, `${b.sp.n}停著的時候用 ✋ 手抓比較好`); return; }
+  if (tool === 'hand' && b.mode === 'fly') { startle(b, `${b.sp.n}會飛，要用 🥅 網子`); return; }
+  catchBug(b);
+}
+function startle(b, msg) {
+  setTip(msg); sMiss();
+  if (b.mode === 'perch') { b.mode = 'fly'; b.vx = (Math.random() - .5) * 200; b.vy = -160; b.tx = Math.random() * W; b.ty = 60 + Math.random() * 200; b.flee = 1.2; b.perchAgain = 2.5 + Math.random() * 2; }
+  else { b.flee = 1.2; b.tx = Math.random() * W; b.ty = 60 + Math.random() * 300; }
+}
+function catchBug(b) {
+  bugs = bugs.filter(x => x !== b);
+  const sp = b.sp, R = RAR[sp.r], sz = (b.mm - sp.mm[0]) / Math.max(1, sp.mm[1] - sp.mm[0]);
+  const pts = Math.round(R.p * (.8 + sz * .6)); score += pts; caught.push({ sp, mm: b.mm, pts });
+  const rec = dex[sp.id] || { n: 0, max: 0 }, isNew = rec.n === 0, isRec = b.mm > rec.max;
+  rec.n++; rec.max = Math.max(rec.max, b.mm); dex[sp.id] = rec; saveRec();
+  sCatch(sp.r); vib(40); setTip(`抓到${sp.n}！`);
+  $('card').innerHTML = `${isNew ? '<span class="new">NEW!</span>' : isRec ? '<span class="new" style="background:#2563eb">新紀錄</span>' : ''}
+    <div class="rar" style="color:${R.c}">${'★'.repeat(sp.r + 1)} ${R.n}</div><div class="nm">${sp.n}</div><canvas width="600" height="260"></canvas>
+    <div style="font-size:15px">大小 <b>${b.mm >= 10 ? b.mm / 10 + ' 公分' : b.mm + ' 公釐'}</b>・+${pts} 分</div><div class="fact">💡 ${sp.fact}</div>`;
+  const g = $('card').querySelector('canvas').getContext('2d');
+  drawBug(g, sp, 300, 130, cardScale(sp), 0, Math.PI / 2, false);
+  paused = true; $('catchOv').hidden = false; hud();
+}
+$('cardOk').onclick = () => { $('catchOv').hidden = true; paused = false; if (t >= GAME_T) endTrip(); };
+
+/* ---------- 更新 ---------- */
+function bugSize(b) { const s = b.sp; return s.kind === 'butterfly' ? (s.mm[1] > 100 ? 36 : 26) : s.kind === 'dragon' ? (s.big ? 40 : 30) : s.kind === 'stick' ? 34 : s.kind === 'ladybug' ? 10 : s.kind === 'firefly' ? 10 : s.kind === 'strider' ? 16 : s.kind === 'bee' ? 14 : 22; }
+function update(dt) {
+  fx.forEach(f => { f.t -= dt; if (f.fly) { f.x += f.vx * dt; f.y += f.vy * dt; } }); fx = fx.filter(f => f.t > 0);
+  if (state !== 'play' && state !== 'release') return;
+  if (state === 'release') { t += dt; for (const b of bugs) { b.ph += dt * 20; b.x += b.vx * dt; b.y += b.vy * dt; b.vy -= 30 * dt; } return; }
+  if (paused) return;
+  t += dt;
+  // 樹林的蟬聲
+  if (scene === 'forest') { cicadaT -= dt; if (cicadaT <= 0 && ac) { for (let i = 0; i < 6; i++) tone(4200 + Math.random() * 300, .12, 'square', .006, null, i * .14); cicadaT = 3 + Math.random() * 4; } }
+  spawnT -= dt; if (spawnT <= 0) { if (bugs.length < 7) spawn(); spawnT = 1.4 + Math.random() * 1.8; }
+  for (const b of bugs) {
+    b.age += dt; b.ph += dt * (b.mode === 'fly' ? 22 : 3); b.flee = Math.max(0, b.flee - dt);
+    if (b.age > b.life && !b.leaving) { b.leaving = true; if (b.mode === 'perch') { b.mode = 'fly'; b.vx = 0; b.vy = -80; } b.tx = Math.random() < .5 ? -60 : W + 60; b.ty = Math.random() * 200; }
+    if (b.landing) { b.y += (b.py - b.y) * dt * 3; b.x = b.px + Math.sin(b.ph * 4) * 6 * b.landing; b.landing = Math.max(0, b.landing - dt * .9); if (b.landing <= 0) { b.landing = 0; b.x = b.px; b.y = b.py; } continue; }
+    // 有工具靠近：停著的蟲看到手快速靠近會飛走；會飛的蟲看到網子快速靠近會閃
+    if (ptr && !b.leaving) {
+      const d = Math.hypot(b.x - ptr.x, b.y - ptr.y);
+      const nerv = b.sp.kind === 'dragon' ? 260 : b.sp.kind === 'butterfly' ? 360 : b.sp.kind === 'damsel' ? 340 : b.mode === 'perch' ? 300 : 400;
+      if (d < 90 && ptr.sp > nerv) startle(b, b.mode === 'perch' ? `${b.sp.n}被嚇飛了，要慢慢靠近` : `${b.sp.n}閃開了，網子慢一點`);
+    }
+    if (b.mode === 'perch') { b.x = b.px + (b.sp.kind === 'strider' ? Math.sin(b.ph) * 8 : 0); if (b.sp.kind === 'hopper' && Math.random() < dt * .08) { const p = freePerch(); if (p) { fx.push({ hop: 1, x: b.px, y: b.py, t: .4 }); b.px = p[0]; b.py = p[1]; b.y = b.py; } } continue; }
+    // 飛行：往目標點飄，抵達就換目標
+    const dx = b.tx - b.x, dy = b.ty - b.y, d = Math.hypot(dx, dy) || 1;
+    const base = b.sp.kind === 'dragon' ? 150 : b.sp.kind === 'damsel' ? 70 : b.sp.kind === 'butterfly' ? 65 : b.sp.kind === 'firefly' ? 30 : b.sp.kind === 'bee' ? 90 : 80;
+    const sp = base * (b.flee > 0 ? 2.6 : 1) * (b.leaving ? 1.6 : 1);
+    if (b.sp.kind === 'dragon' && !b.flee && Math.random() < dt * .6) { b.hover = .8; }   // 蜻蜓會懸停
+    b.hover = Math.max(0, (b.hover || 0) - dt);
+    const k = b.hover > 0 ? .05 : 1;
+    b.vx += (dx / d * sp - b.vx) * dt * 2.5; b.vy += (dy / d * sp - b.vy) * dt * 2.5;
+    const flutter = b.sp.kind === 'butterfly' ? Math.sin(b.ph * .35) * 60 : b.sp.kind === 'firefly' ? Math.sin(b.ph * .2) * 20 : 0;
+    b.x += b.vx * dt * k; b.y += (b.vy + flutter) * dt * k;
+    b.ang = Math.atan2(b.vy, b.vx);
+    if (d < 20 && !b.leaving) {
+      if (b.perchAgain !== undefined) { b.perchAgain -= dt; }
+      if (b.perchAgain !== undefined && b.perchAgain <= 0) { const p = freePerch(); if (p && !b.sp.danger && b.sp.mode === 'perch') { b.mode = 'perch'; b.px = p[0]; b.py = p[1]; b.landing = .6; b.perchAgain = undefined; continue; } }
+      b.tx = 40 + Math.random() * 320; b.ty = 70 + Math.random() * (scene === 'stream' ? 330 : 340);
+    }
+    if (b.leaving && (b.x < -50 || b.x > W + 50 || b.y < -50)) b.gone = true;
+  }
+  bugs = bugs.filter(b => !b.gone);
+  if (t >= GAME_T) endTrip();
+  hud();
+}
+function endTrip() {
+  if (state !== 'play') return; state = 'over'; ptr = null; pid = null;
+  const nb = score > (bests[scene] || 0); if (nb) { bests[scene] = score; saveRec(); }
+  const rarest = caught.reduce((m, c) => (!m || c.sp.r > m.sp.r || (c.sp.r === m.sp.r && c.mm > m.mm) ? c : m), null);
+  $('oTitle').textContent = score >= 500 ? '昆蟲博士！🏆' : score >= 200 ? '收穫滿滿 🦋' : score > 0 ? '有抓到就很棒 🙂' : '昆蟲都躲起來了 😅';
+  $('oStats').innerHTML = `<div>分數<b>${score}</b></div><div>抓到<b>${caught.length} 隻</b></div>
+    <div>最稀有<b style="font-size:14px">${rarest ? `${rarest.sp.n} ${'★'.repeat(rarest.sp.r + 1)}` : '—'}</b></div><div>${SCENES[scene]}最高分<b>${bests[scene] || 0}${nb ? ' 🆕' : ''}</b></div>
+    <div>圖鑑收集<b>${Object.keys(dex).length}/${ALL.length}</b></div><div>種類<b>${new Set(caught.map(c => c.sp.id)).size} 種</b></div>`;
+  $('release').hidden = caught.length === 0; $('over').hidden = false; hud();
+}
+$('release').onclick = () => {
+  $('over').hidden = true; state = 'release'; t = 0;
+  bugs = caught.map((c, i) => ({ sp: c.sp, mm: c.mm, mode: 'fly', x: 120 + Math.random() * 160, y: 480 + Math.random() * 60, vx: (Math.random() - .5) * 120, vy: -60 - Math.random() * 80, ph: i, ang: -Math.PI / 2 }));
+  setTip('再見～謝謝你們陪我玩 🍃'); [523, 659, 784].forEach((f, i) => tone(f, .3, 'sine', .05, null, i * .2));
+  setTimeout(() => { state = 'over'; bugs = []; $('release').hidden = true; $('over').hidden = false; setTip('放生完成！'); }, 3200);
+};
+$('again').onclick = () => startTrip(scene);
+$('toMenu').onclick = () => { state = 'menu'; $('over').hidden = true; $('menu').hidden = false; menuBests(); setTip(''); hud(); };
+document.querySelectorAll('.scene').forEach(b => b.onclick = () => { initAudio(); startTrip(b.dataset.s); });
+$('dexBtn').onclick = () => { renderDex(); $('dexOv').hidden = false; };
+$('dexClose').onclick = () => $('dexOv').hidden = true;
+function renderDex() {
+  const body = $('dexBody'); body.innerHTML = '';
+  for (const k in SCENES) {
+    const h = document.createElement('h3'); h.textContent = SCENES[k]; body.appendChild(h);
+    const grid = document.createElement('div'); grid.className = 'dexgrid';
+    for (const sp of BUGS[k].filter(b => !b.danger)) {
+      const rec = dex[sp.id], d = document.createElement('div'), c = document.createElement('canvas'); c.width = 200; c.height = 112;
+      drawBug(c.getContext('2d'), sp, 100, 56, cardScale(sp) * .42, 0, Math.PI / 2, !rec); d.appendChild(c);
+      const info = document.createElement('div');
+      info.innerHTML = rec ? `<b>${sp.n}</b><br><span style="color:${RAR[sp.r].c}">${'★'.repeat(sp.r + 1)}</span> ×${rec.n}<br>最大 ${rec.max >= 10 ? rec.max / 10 + 'cm' : rec.max + 'mm'}` : `<b>？？？</b><br><span style="color:${RAR[sp.r].c}">${'★'.repeat(sp.r + 1)}</span><br>未發現`;
+      d.appendChild(info); grid.appendChild(d);
+    }
+    body.appendChild(grid);
+  }
+  const p = document.createElement('p'); p.style.textAlign = 'center'; p.textContent = `收集進度 ${Object.keys(dex).length} / ${ALL.length}`; body.appendChild(p);
+}
+
+/* ---------- 畫昆蟲 ---------- */
+function drawBug(g, sp, x, y, s, ang, ph, sil) {
+  const C = sil ? '#1f2937' : sp.col, C2 = sil ? '#1f2937' : (sp.col2 || sp.col);
+  g.save(); g.translate(x, y); g.rotate(ang); g.scale(s, s);
+  const legs = (n, len, spread, col) => { g.strokeStyle = col; g.lineWidth = 1.4; g.lineCap = 'round'; for (let i = 0; i < n; i++) for (const sd of [-1, 1]) { const bx = -4 + i * 5, w = Math.sin(ph + i * 2) * .2; g.beginPath(); g.moveTo(bx, sd * 3); g.lineTo(bx + Math.cos(sd * (1.2 + i * .3) + w) * len * .5, sd * spread); g.lineTo(bx + Math.cos(sd * (1.2 + i * .3)) * len * .5 - 3 + i * 3, sd * (spread + len * .4)); g.stroke(); } };
+  switch (sp.kind) {
+    case 'butterfly': {
+      const flap = Math.abs(Math.sin(ph)) * .8 + .2, big = sp.mm[1] > 100 ? 1.35 : 1;
+      g.scale(big, big);
+      for (const sd of [-1, 1]) {
+        g.save(); g.scale(1, sd * flap);
+        g.fillStyle = C; g.beginPath(); g.moveTo(0, 0); g.bezierCurveTo(-4, -22, 16, -26, 18, -12); g.bezierCurveTo(16, -4, 6, -2, 0, 0); g.fill();
+        g.beginPath(); g.moveTo(0, 0); g.bezierCurveTo(-14, -18, -20, -6, -12, 0); g.fill();
+        if (sp.tail) { g.beginPath(); g.moveTo(-10, -4); g.lineTo(-20, -8); g.lineTo(-12, -1); g.fill(); }
+        if (!sil) { g.fillStyle = C2; g.beginPath(); g.arc(12, -14, 3.2, 0, 7); g.fill(); if (sp.tail) { g.beginPath(); g.arc(-10, -6, 2.4, 0, 7); g.fill(); }
+          if (sp.shine) { g.fillStyle = `rgba(196,181,253,${.4 + .4 * Math.sin(ph * .3)})`; g.beginPath(); g.ellipse(8, -12, 7, 4, -.4, 0, 7); g.fill(); } }
+        g.restore();
+      }
+      g.fillStyle = sil ? C : '#1f2937'; g.beginPath(); g.ellipse(0, 0, 9, 2.2, 0, 0, 7); g.fill();
+      g.strokeStyle = sil ? C : '#1f2937'; g.lineWidth = .8; g.beginPath(); g.moveTo(8, -1); g.lineTo(14, -5); g.moveTo(8, 1); g.lineTo(14, 5); g.stroke();
+      break; }
+    case 'dragon': case 'damsel': {
+      const L = sp.kind === 'damsel' ? .8 : (sp.big ? 1.5 : 1), flap = sp.kind === 'damsel' ? Math.sin(ph) * .3 : Math.sin(ph * 1.3) * .25;
+      g.scale(L, L);
+      g.fillStyle = sil ? 'rgba(31,41,55,.6)' : 'rgba(200,230,255,.45)'; g.strokeStyle = sil ? C : 'rgba(80,100,120,.5)'; g.lineWidth = .5;
+      for (const sd of [-1, 1]) for (const off of [2, -3]) { g.beginPath(); g.ellipse(off, sd * 10, 3, 11, sd * (.15 + flap) + off * .03, 0, 7); g.fill(); g.stroke(); }
+      g.fillStyle = C; g.beginPath(); g.ellipse(-10, 0, 12, sp.kind === 'damsel' ? 1 : 1.6, 0, 0, 7); g.fill();
+      if (!sil && sp.col2) { g.fillStyle = C2; for (let i = 0; i < 5; i++) g.fillRect(-20 + i * 4, -1.2, 1.6, 2.4); }
+      g.fillStyle = C; g.beginPath(); g.ellipse(2, 0, 4, 2.6, 0, 0, 7); g.fill();
+      g.fillStyle = sil ? C : (sp.kind === 'damsel' ? '#38bdf8' : '#7f1d1d'); g.beginPath(); g.arc(7, -1.6, 2, 0, 7); g.arc(7, 1.6, 2, 0, 7); g.fill();
+      break; }
+    case 'bee': {
+      const flap = Math.abs(Math.sin(ph * 1.5));
+      g.fillStyle = 'rgba(220,235,255,.6)'; for (const sd of [-1, 1]) { g.beginPath(); g.ellipse(0, sd * (5 + flap * 2), 5, 3, sd * .5, 0, 7); g.fill(); }
+      g.fillStyle = C; g.beginPath(); g.ellipse(-3, 0, 7, 4.5, 0, 0, 7); g.fill();
+      g.fillStyle = '#111'; for (const xx of [-6, -2, 2]) g.fillRect(xx, -4.5, 1.8, 9);
+      g.beginPath(); g.moveTo(-10, 0); g.lineTo(-13, 0); g.strokeStyle = '#111'; g.lineWidth = 1; g.stroke();
+      g.fillStyle = '#111'; g.beginPath(); g.arc(5, 0, 3, 0, 7); g.fill();
+      break; }
+    case 'firefly': {
+      const glow = sil ? 0 : (Math.sin(ph * .15) + 1) / 2;
+      if (glow > .05) { const gr = g.createRadialGradient(-5, 0, 0, -5, 0, 14); gr.addColorStop(0, `rgba(250,255,140,${glow})`); gr.addColorStop(1, 'rgba(250,255,140,0)'); g.fillStyle = gr; g.beginPath(); g.arc(-5, 0, 14, 0, 7); g.fill(); }
+      g.fillStyle = C; g.beginPath(); g.ellipse(0, 0, 6, 3, 0, 0, 7); g.fill();
+      g.fillStyle = sil ? C : `rgb(${220 + glow * 35},${230 + glow * 25},120)`; g.beginPath(); g.ellipse(-5, 0, 3, 2.6, 0, 0, 7); g.fill();
+      g.fillStyle = sil ? C : '#f97316'; g.beginPath(); g.arc(5, 0, 2, 0, 7); g.fill();
+      break; }
+    case 'ladybug': {
+      g.scale(.5, .5); legs(3, 8, 6, '#111');
+      g.fillStyle = C; g.beginPath(); g.arc(0, 0, 9, 0, 7); g.fill();
+      if (!sil) { g.fillStyle = '#111'; g.beginPath(); g.arc(7, 0, 4, -1.6, 1.6); g.fill(); g.fillRect(-9, -.5, 16, 1); for (const [a, b] of [[-3, -4], [-3, 4], [2, -5], [2, 5], [-6, 0]]) { g.beginPath(); g.arc(a, b, 1.8, 0, 7); g.fill(); } }
+      break; }
+    case 'cicada': {
+      legs(3, 10, 6, sil ? C : '#3f2f1e');
+      g.fillStyle = sil ? C : 'rgba(220,230,240,.5)'; g.strokeStyle = sil ? C : '#5b4a2e'; g.lineWidth = .6;
+      for (const sd of [-1, 1]) { g.beginPath(); g.moveTo(4, 0); g.quadraticCurveTo(-8, sd * 12, -20, sd * 3); g.lineTo(-18, 0); g.closePath(); g.fill(); g.stroke(); }
+      g.fillStyle = C; g.beginPath(); g.ellipse(-2, 0, 10, 5, 0, 0, 7); g.fill(); g.beginPath(); g.ellipse(8, 0, 4, 6.5, 0, 0, 7); g.fill();
+      if (!sil) { g.fillStyle = '#a3e635'; g.beginPath(); g.arc(9, -5, 1.6, 0, 7); g.arc(9, 5, 1.6, 0, 7); g.fill(); }
+      break; }
+    case 'stick': {
+      g.strokeStyle = C; g.lineCap = 'round'; g.lineWidth = 2.4; g.beginPath(); g.moveTo(-26, 0); g.lineTo(18, 0); g.stroke();
+      g.lineWidth = 1.2; for (const [bx, sd] of [[8, 1], [8, -1], [-4, 1], [-4, -1], [-14, 1], [-14, -1]]) { g.beginPath(); g.moveTo(bx, 0); g.lineTo(bx + 6, sd * 8); g.lineTo(bx + 12, sd * 9); g.stroke(); }
+      g.lineWidth = .7; g.beginPath(); g.moveTo(18, 0); g.lineTo(30, -3); g.moveTo(18, 0); g.lineTo(30, 3); g.stroke();
+      break; }
+    case 'hopper': {
+      g.strokeStyle = sil ? C : '#4d7c0f'; g.lineWidth = 2; g.lineCap = 'round';
+      for (const sd of [-1, 1]) { g.beginPath(); g.moveTo(-2, sd * 2); g.lineTo(-12, sd * 9); g.lineTo(-20, sd * 5); g.stroke(); }
+      legs(2, 8, 5, sil ? C : '#4d7c0f');
+      g.fillStyle = C; g.beginPath(); g.ellipse(-2, 0, 13, 3.6, 0, 0, 7); g.fill(); g.beginPath(); g.ellipse(11, 0, 4, 3.4, 0, 0, 7); g.fill();
+      if (!sil) { g.fillStyle = '#365314'; g.beginPath(); g.arc(12, -2.6, 1.3, 0, 7); g.arc(12, 2.6, 1.3, 0, 7); g.fill(); }
+      g.strokeStyle = C; g.lineWidth = .7; g.beginPath(); g.moveTo(14, -1); g.lineTo(22, -6); g.moveTo(14, 1); g.lineTo(22, 6); g.stroke();
+      break; }
+    case 'strider': {
+      g.strokeStyle = C; g.lineWidth = .9;
+      for (const [a, l] of [[.5, 16], [1.6, 12], [2.6, 18]]) for (const sd of [-1, 1]) { g.beginPath(); g.moveTo(0, 0); g.lineTo(Math.cos(a) * l, sd * Math.sin(a) * l); g.stroke(); }
+      g.fillStyle = C; g.beginPath(); g.ellipse(0, 0, 7, 1.6, 0, 0, 7); g.fill();
+      break; }
+    default: {  // 甲蟲類
+      const isStag = sp.kind === 'stag', isRhino = sp.kind === 'rhino', isLong = sp.kind === 'longarm';
+      legs(3, isLong ? 12 : 10, 7, sil ? C : '#1c120a');
+      if (isLong && !sil) { g.strokeStyle = '#2f3f1f'; g.lineWidth = 1.6; for (const sd of [-1, 1]) { g.beginPath(); g.moveTo(6, sd * 4); g.lineTo(16, sd * 16); g.lineTo(30, sd * 20); g.stroke(); } }
+      const bg = g.createLinearGradient(0, -8, 0, 8); bg.addColorStop(0, sil ? C : '#ffffff55'); bg.addColorStop(.3, C); bg.addColorStop(1, C);
+      g.fillStyle = bg; g.beginPath(); g.ellipse(-4, 0, 11, 7.5, 0, 0, 7); g.fill();
+      g.strokeStyle = 'rgba(0,0,0,.4)'; g.lineWidth = .6; g.beginPath(); g.moveTo(5, 0); g.lineTo(-15, 0); g.stroke();
+      g.fillStyle = C; g.beginPath(); g.ellipse(8, 0, 4.5, 6, 0, 0, 7); g.fill();
+      if (isLong && !sil) { g.fillStyle = '#facc15'; for (const [a, b] of [[-2, -3], [-7, 3], [-10, -2]]) { g.beginPath(); g.arc(a, b, 1.3, 0, 7); g.fill(); } }
+      if (isRhino) { g.strokeStyle = C; g.lineWidth = 2.6; g.lineCap = 'round'; g.beginPath(); g.moveTo(11, 0); g.quadraticCurveTo(20, 0, 22, -6); g.stroke(); g.lineWidth = 1.6; g.beginPath(); g.moveTo(22, -6); g.lineTo(25, -4); g.moveTo(22, -6); g.lineTo(24, -9); g.stroke(); }
+      if (isStag) { g.strokeStyle = C; g.lineWidth = 2; g.lineCap = 'round'; for (const sd of [-1, 1]) { g.beginPath(); g.moveTo(11, sd * 2.5); g.quadraticCurveTo(20, sd * 6, 22, sd * 1); g.stroke(); g.beginPath(); g.moveTo(17, sd * 4.5); g.lineTo(18, sd * 2); g.stroke(); } }
+    }
+  }
+  g.restore();
+}
+function cardScale(sp) {   // 圖鑑卡上依昆蟲外形決定放大倍率，讓每隻都差不多大
+  return { butterfly: sp.mm[1] > 100 ? 3.4 : 4.2, dragon: sp.big ? 2.6 : 3.6, damsel: 4.6, bee: 6, firefly: 7, ladybug: 9, cicada: 4.6, stick: 3.4, hopper: 4.6, strider: 5.2 }[sp.kind] || 4.4;
+}
+function bugScale(b) { return b.sp.kind === 'ladybug' ? 1.4 : b.sp.kind === 'firefly' ? 1.1 : b.sp.kind === 'strider' ? 1.2 : b.sp.kind === 'bee' ? (b.sp.id === 'bee' ? .9 : 1.25) : 1.15; }
+
+/* ---------- 場景 ---------- */
+function drawScene() {
+  if (scene === 'forest') {
+    const sky = ctx.createLinearGradient(0, 0, 0, H); sky.addColorStop(0, '#bbf7d0'); sky.addColorStop(1, '#14532d'); ctx.fillStyle = sky; ctx.fillRect(0, 0, W, H);
+    ctx.fillStyle = '#166534'; for (let i = 0; i < 9; i++) { ctx.beginPath(); ctx.arc(i * 50, 40 + (i % 2) * 20, 60, 0, 7); ctx.fill(); }
+    ctx.fillStyle = 'rgba(255,255,200,.12)'; for (let i = 0; i < 4; i++) { ctx.beginPath(); ctx.moveTo(60 + i * 100, 0); ctx.lineTo(100 + i * 100, 0); ctx.lineTo(140 + i * 100, H); ctx.lineTo(80 + i * 100, H); ctx.fill(); }
+    for (const [x, w] of [[75, 46], [195, 52], [315, 48]]) { const tg = ctx.createLinearGradient(x - w / 2, 0, x + w / 2, 0); tg.addColorStop(0, '#3f2a1a'); tg.addColorStop(.5, '#6b4a2e'); tg.addColorStop(1, '#3f2a1a'); ctx.fillStyle = tg; ctx.fillRect(x - w / 2, 60, w, H); ctx.strokeStyle = 'rgba(0,0,0,.25)'; ctx.lineWidth = 2; for (let y = 90; y < H; y += 34) { ctx.beginPath(); ctx.moveTo(x - w / 2 + 6, y); ctx.quadraticCurveTo(x, y + 8, x + w / 2 - 6, y); ctx.stroke(); } }
+    ctx.strokeStyle = '#4a3220'; ctx.lineWidth = 8; ctx.beginPath(); ctx.moveTo(75, 190); ctx.lineTo(130, 170); ctx.moveTo(315, 180); ctx.lineTo(260, 165); ctx.stroke();
+    ctx.fillStyle = '#365314'; ctx.fillRect(0, H - 40, W, 40);
+  } else if (scene === 'flower') {
+    const sky = ctx.createLinearGradient(0, 0, 0, 420); sky.addColorStop(0, '#7dd3fc'); sky.addColorStop(1, '#e0f2fe'); ctx.fillStyle = sky; ctx.fillRect(0, 0, W, H);
+    ctx.fillStyle = '#fff'; for (const [x, y] of [[80, 70], [290, 50]]) { ctx.beginPath(); ctx.arc(x, y, 16, 0, 7); ctx.arc(x + 18, y - 6, 20, 0, 7); ctx.arc(x + 38, y, 15, 0, 7); ctx.fill(); }
+    ctx.fillStyle = '#86efac'; ctx.beginPath(); ctx.moveTo(0, 400); ctx.quadraticCurveTo(200, 360, 400, 400); ctx.lineTo(400, H); ctx.lineTo(0, H); ctx.fill();
+    ctx.fillStyle = '#4ade80'; ctx.fillRect(0, 440, W, H - 440);
+    const fl = [[60, 470, '#f472b6'], [140, 500, '#facc15'], [230, 485, '#fb923c'], [320, 470, '#f472b6'], [100, 430, '#a78bfa'], [260, 440, '#facc15'], [180, 455, '#f87171'], [360, 520, '#fb923c'], [40, 530, '#a78bfa'], [300, 545, '#f472b6']];
+    for (const [x, y, c] of fl) { ctx.strokeStyle = '#15803d'; ctx.lineWidth = 3; ctx.beginPath(); ctx.moveTo(x, y + 8); ctx.lineTo(x, y + 60); ctx.stroke(); ctx.fillStyle = c; for (let k = 0; k < 6; k++) { const a = k / 6 * 6.28 + t * .2; ctx.beginPath(); ctx.ellipse(x + Math.cos(a) * 9, y + Math.sin(a) * 9, 7, 4.5, a, 0, 7); ctx.fill(); } ctx.fillStyle = '#fde047'; ctx.beginPath(); ctx.arc(x, y, 5, 0, 7); ctx.fill(); }
+  } else {
+    const sky = ctx.createLinearGradient(0, 0, 0, 400); sky.addColorStop(0, '#312e81'); sky.addColorStop(.6, '#c2410c'); sky.addColorStop(1, '#fdba74'); ctx.fillStyle = sky; ctx.fillRect(0, 0, W, H);
+    ctx.fillStyle = '#1e1b4b'; ctx.beginPath(); ctx.moveTo(0, 360); ctx.lineTo(90, 290); ctx.lineTo(190, 350); ctx.lineTo(300, 280); ctx.lineTo(400, 340); ctx.lineTo(400, 440); ctx.lineTo(0, 440); ctx.fill();
+    const wg = ctx.createLinearGradient(0, 440, 0, H); wg.addColorStop(0, '#1e3a8a'); wg.addColorStop(1, '#0c1a3a'); ctx.fillStyle = wg; ctx.fillRect(0, 440, W, H - 440);
+    ctx.strokeStyle = 'rgba(253,186,116,.35)'; ctx.lineWidth = 2; for (let i = 0; i < 8; i++) { const y = 455 + i * 18, x = (t * 20 + i * 47) % W; ctx.beginPath(); ctx.moveTo(x, y); ctx.lineTo(x + 40, y); ctx.stroke(); }
+    ctx.strokeStyle = '#14532d'; ctx.lineWidth = 3; for (const x of [20, 34, 370, 384, 356]) { ctx.beginPath(); ctx.moveTo(x, H); ctx.quadraticCurveTo(x + Math.sin(t + x) * 5, 470, x - 6, 380); ctx.stroke(); }
+  }
+}
+function draw() {
+  ctx.setTransform(scale, 0, 0, scale, 0, 0);
+  if (state === 'menu') { scene = scene || 'forest'; }
+  drawScene();
+  for (const b of bugs) {
+    const s = bugScale(b);
+    if (b.mode === 'perch' && !b.landing) drawBug(ctx, b.sp, b.x, b.y, s, b.sp.kind === 'strider' ? 0 : -Math.PI / 2 + Math.sin(b.ph * .3) * .08, b.ph, false);
+    else drawBug(ctx, b.sp, b.x, b.y, s, b.sp.kind === 'butterfly' ? 0 : b.ang || 0, b.ph, false);
+    if (b.sp.danger && state === 'play') { ctx.fillStyle = 'rgba(239,68,68,.85)'; ctx.font = '700 10px system-ui'; ctx.textAlign = 'center'; ctx.fillText('⚠', b.x, b.y - 16); }
+  }
+  // 工具
+  if (ptr && state === 'play') {
+    if (tool === 'net') {
+      ctx.strokeStyle = '#a16207'; ctx.lineWidth = 4; ctx.lineCap = 'round'; ctx.beginPath(); ctx.moveTo(ptr.x + 24, ptr.y + 24); ctx.lineTo(ptr.x + 52, ptr.y + OFF + 24); ctx.stroke();
+      ctx.fillStyle = 'rgba(255,255,255,.22)'; ctx.beginPath(); ctx.arc(ptr.x, ptr.y, 34, 0, 7); ctx.fill();
+      ctx.strokeStyle = 'rgba(255,255,255,.5)'; ctx.lineWidth = .8; for (let k = -30; k <= 30; k += 8) { ctx.beginPath(); ctx.moveTo(ptr.x + k, ptr.y - Math.sqrt(34 * 34 - k * k)); ctx.lineTo(ptr.x + k, ptr.y + Math.sqrt(34 * 34 - k * k)); ctx.stroke(); }
+      ctx.strokeStyle = '#e11d48'; ctx.lineWidth = 3; ctx.beginPath(); ctx.arc(ptr.x, ptr.y, 34, 0, 7); ctx.stroke();
+    } else {
+      ctx.font = '40px system-ui'; ctx.textAlign = 'center'; ctx.textBaseline = 'middle'; ctx.fillText('🤏', ptr.x + 6, ptr.y + 6); ctx.textBaseline = 'alphabetic';
+      ctx.strokeStyle = 'rgba(255,255,255,.6)'; ctx.setLineDash([4, 4]); ctx.lineWidth = 1.5; ctx.beginPath(); ctx.arc(ptr.x, ptr.y, 22, 0, 7); ctx.stroke(); ctx.setLineDash([]);
+    }
+    const tooFast = ptr.sp > (tool === 'net' ? 400 : 300);
+    ctx.fillStyle = tooFast ? '#ef4444' : '#22c55e'; ctx.font = '700 11px system-ui'; ctx.textAlign = 'center'; ctx.fillText(tooFast ? '太快了！' : '慢慢靠近…', ptr.x, ptr.y - 44);
+  }
+  for (const f of fx) {
+    if (f.swing) { ctx.strokeStyle = `rgba(255,255,255,${f.t * 2.5})`; ctx.lineWidth = 3; ctx.beginPath(); ctx.arc(f.x, f.y, (f.swing === 'net' ? 34 : 22) * (1.6 - f.t * 2), 0, 7); ctx.stroke(); }
+    else if (f.sting) { ctx.fillStyle = `rgba(239,68,68,${f.t * .45})`; ctx.fillRect(0, 0, W, H); }
+    else if (f.hop) { ctx.strokeStyle = `rgba(255,255,255,${f.t * 2})`; ctx.beginPath(); ctx.arc(f.x, f.y, 14 * (1.4 - f.t), 0, 7); ctx.stroke(); }
+    else if (f.s) { ctx.globalAlpha = Math.min(1, f.t * 2); ctx.font = '900 15px system-ui'; ctx.textAlign = 'center'; ctx.lineWidth = 4; ctx.strokeStyle = '#000'; ctx.strokeText(f.s, f.x, f.y - (1 - f.t) * 16); ctx.fillStyle = f.col; ctx.fillText(f.s, f.x, f.y - (1 - f.t) * 16); ctx.globalAlpha = 1; }
+  }
+  if (state === 'play' && !ptr && t < 6) { ctx.fillStyle = '#0008'; ctx.fillRect(30, H / 2 - 18, 340, 32); ctx.fillStyle = '#fde047'; ctx.font = '700 13px system-ui'; ctx.textAlign = 'center'; ctx.fillText('按住拿出工具 → 慢慢移過去 → 對準了放開', 200, H / 2 + 3); }
+}
+
+let last = performance.now();
+function loop(now) { const dt = Math.min(.033, (now - last) / 1000); last = now; update(dt); draw(); requestAnimationFrame(loop); }
+resize(); menuBests(); hud(); requestAnimationFrame(loop);
+window.__ig = { get bugs() { return bugs; }, get state() { return state; }, get score() { return score; }, get caught() { return caught; }, get paused() { return paused; }, startTrip, endTrip, setTool, get t() { return t; } };
+})();
+</script>
+</body>
+</html>

@@ -1,0 +1,363 @@
+<!DOCTYPE html>
+<html lang="zh-Hant">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1,maximum-scale=1,user-scalable=no">
+<title>夜市彈珠台</title>
+<style>
+  html,body{margin:0;height:100%;background:#1a0f0a;color:#fff3dc;font-family:system-ui,-apple-system,"PingFang TC","Noto Sans TC",sans-serif;overflow:hidden;touch-action:none;user-select:none;-webkit-user-select:none}
+  #hud{max-width:520px;margin:0 auto;display:flex;justify-content:space-between;align-items:center;padding:8px 14px 2px;font-size:12px}
+  #hud b{display:block;font-size:22px;color:#ffd166;font-variant-numeric:tabular-nums}
+  #balls{display:flex;gap:3px;flex-wrap:wrap;max-width:140px;justify-content:center;margin-top:3px}
+  #balls i{width:10px;height:10px;border-radius:50%;background:radial-gradient(circle at 35% 35%,#fff,#aab 60%,#667)}
+  #balls i.used{opacity:.15}
+  #msg{text-align:center;height:20px;font-size:14px;color:#ffd166}
+  #wrap{position:relative;display:flex;justify-content:center}
+  canvas{display:block;touch-action:none}
+  .ov{position:absolute;inset:0;display:flex;align-items:center;justify-content:center}
+  .box{background:#2a160ced;border:2px solid #c98b4a;border-radius:16px;padding:20px;width:min(300px,82%);text-align:center}
+  .box h2{margin:0 0 6px;font-size:30px;color:#ffd166;text-shadow:0 0 12px #ff9f1c88}
+  .box p{font-size:13px;opacity:.88;line-height:1.7;margin:6px 0 14px}
+  .go{width:100%;background:#e63946;color:#fff;border:0;border-radius:10px;padding:13px;font-size:17px;font-weight:700}
+  #prize{font-size:44px;margin:4px 0}
+  [hidden]{display:none!important}
+</style>
+</head>
+<body>
+<div id="hud">
+  <div>分數<b id="score">0</b></div>
+  <div style="text-align:center">剩餘彈珠<div id="balls"></div></div>
+  <div style="text-align:right">最高分<b id="hi">0</b></div>
+</div>
+<div id="msg"></div>
+<div id="wrap">
+  <canvas id="c"></canvas>
+  <div class="ov" id="menu"><div class="box">
+    <h2>夜市彈珠台</h2>
+    <p><b>按住螢幕</b>把拉桿往下拉，<b>放開</b>彈珠就會射上去。<br>拉越久力道越大，彈珠沿著釘子落下，<br>掉進洞裡就得分！最上面的洞是 <b>100 分大獎</b>。<br>一局 10 顆彈珠。</p>
+    <button class="go" id="start">投幣開始</button>
+  </div></div>
+  <div class="ov" id="over" hidden><div class="box">
+    <div id="prize"></div>
+    <h2 id="oTitle"></h2>
+    <p id="oSub"></p>
+    <button class="go" id="again">再玩一次</button>
+  </div></div>
+</div>
+<script>
+(() => {
+const W = 400, H = 690;
+const cv = document.getElementById('c'), ctx = cv.getContext('2d');
+let scale = 1;
+function resize() {
+  const top = document.getElementById('hud').offsetHeight + document.getElementById('msg').offsetHeight;
+  const s = Math.min((innerWidth - 8) / W, (innerHeight - top - 8) / H), d = window.devicePixelRatio || 1;
+  cv.style.width = W * s + 'px'; cv.style.height = H * s + 'px';
+  cv.width = Math.round(W * s * d); cv.height = Math.round(H * s * d); scale = s * d;
+}
+addEventListener('resize', resize); resize();
+
+/* 音效 */
+let ac = null, lastDing = 0;
+function initAudio() { if (!ac) { try { ac = new (window.AudioContext || window.webkitAudioContext)(); } catch (e) {} } else if (ac.state === 'suspended') ac.resume(); }
+function tone(f, d, type = 'sine', v = .05, f2) {
+  if (!ac) return; const t = ac.currentTime, o = ac.createOscillator(), g = ac.createGain();
+  o.type = type; o.frequency.setValueAtTime(f, t); if (f2) o.frequency.exponentialRampToValueAtTime(f2, t + d);
+  g.gain.setValueAtTime(v, t); g.gain.exponentialRampToValueAtTime(.0001, t + d);
+  o.connect(g).connect(ac.destination); o.start(t); o.stop(t + d);
+}
+function ding(v) { const n = performance.now(); if (n - lastDing < 35) return; lastDing = n; tone(2600 + Math.random() * 1400, .06, 'sine', Math.min(.05, v)); }
+function jingle(big) { const ns = big ? [784, 988, 1175, 1568, 1976] : [880, 1175, 1568]; ns.forEach((f, i) => setTimeout(() => tone(f, .16, 'square', .035), i * 80)); }
+
+/* 台面 */
+const BR = 6.5, G = 520, PIN_R = 2.6;
+const ARC = { x: 198, y: 200, r: 178 };
+const walls = [];
+const seg = (x1, y1, x2, y2, o = {}) => { const s = { x1, y1, x2, y2, e: .35, ...o }; walls.push(s); return s; };
+const arcPts = [];
+for (let i = 0; i <= 32; i++) { const a = Math.PI + Math.PI * i / 32; arcPts.push([ARC.x + Math.cos(a) * ARC.r, ARC.y + Math.sin(a) * ARC.r]); }
+for (let i = 0; i < 32; i++) seg(...arcPts[i], ...arcPts[i + 1], { e: .2 });
+seg(20, 200, 20, 640);            // 左牆
+seg(376, 200, 376, 690);          // 右外牆
+seg(350, 245, 350, 690);          // 發射道隔板
+const gate = seg(350, 245, 376, 222, { gate: true });
+seg(20, 640, 178, 676);           // 底部漏斗
+seg(350, 640, 210, 676);
+const PL_TOP = 655;
+
+// 得分洞
+const POCKETS = [
+  { x: 185, y: 168, pts: 100, label: '大獎', col: '#ff006e' },
+  { x: 118, y: 286, pts: 50, col: '#8338ec' },
+  { x: 252, y: 286, pts: 50, col: '#8338ec' },
+  { x: 185, y: 335, pts: 30, col: '#3a86ff' },
+  { x: 78,  y: 420, pts: 20, col: '#06d6a0' },
+  { x: 292, y: 420, pts: 20, col: '#06d6a0' },
+  { x: 138, y: 500, pts: 10, col: '#fb8500' },
+  { x: 232, y: 500, pts: 10, col: '#fb8500' },
+  { x: 58,  y: 572, pts: 5, col: '#ffbe0b' },
+  { x: 312, y: 572, pts: 5, col: '#ffbe0b' },
+  { x: 185, y: 590, pts: 5, col: '#ffbe0b' },
+];
+const HW = 7.8;  // 洞口半寬
+POCKETS.forEach(p => {
+  p.flash = 0;
+  seg(p.x - HW - 2, p.y - 3, p.x - HW - 2, p.y + 12, { e: .3, cup: true });
+  seg(p.x + HW + 2, p.y - 3, p.x + HW + 2, p.y + 12, { e: .3, cup: true });
+  seg(p.x - HW - 2, p.y + 12, p.x + HW + 2, p.y + 12, { e: .2, cup: true });
+});
+
+// 釘子
+const pins = [];
+function inField(x, y) {
+  if (x < 30 || x > 341) return false;
+  if (Math.hypot(x - ARC.x, y - ARC.y) > ARC.r - 14 && y < ARC.y) return false;
+  // 漏斗上方
+  if (y > 628) return false;
+  return true;
+}
+for (let r = 0, y = 118; y < 625; r++, y += 23) {
+  for (let x = 38 + (r % 2) * 13; x < 345; x += 26) {
+    if (!inField(x, y)) continue;
+    if (POCKETS.some(p => Math.abs(x - p.x) < 20 && y > p.y - 18 && y < p.y + 22)) continue;
+    pins.push({ x, y, f: 0 });
+  }
+}
+// 洞口上方的引導釘（八字形）
+// 洞口兩側擋釘（會把珠子彈開，比較難進）
+POCKETS.forEach(p => { pins.push({ x: p.x - HW - 5, y: p.y - 9, f: 0 }, { x: p.x + HW + 5, y: p.y - 9, f: 0 }); });
+
+/* 狀態 */
+let balls = [], score = 0, left = 10, pull = 0, charging = false, state = 'menu', popups = [], time = 0, loadT = 0;
+let hi = 0; try { hi = +localStorage.getItem('yeshiPinHi') || 0; } catch (e) {}
+const inLane = () => balls.find(b => !b.out && b.x > 350);
+function setMsg(t) { document.getElementById('msg').textContent = t; }
+function hud() {
+  document.getElementById('score').textContent = score;
+  document.getElementById('hi').textContent = hi;
+  document.getElementById('balls').innerHTML = Array.from({ length: 10 }, (_, i) => `<i class="${i < 10 - left ? 'used' : ''}"></i>`).join('');
+}
+function load() { if (left > 0 && !inLane()) balls.push({ x: 363, y: PL_TOP - BR, vx: 0, vy: 0, out: false, fired: false }); }
+function startGame() {
+  balls = []; score = 0; left = 10; pull = 0; charging = false; popups = []; state = 'play';
+  document.getElementById('menu').hidden = true; document.getElementById('over').hidden = true;
+  load(); hud(); setMsg('按住蓄力，放開發射');
+}
+function launch() {
+  const b = inLane();
+  if (state === 'play' && b && b.y > PL_TOP - 40 && pull > .03) {
+    b.vy = -(430 + 560 * pull) * (0.97 + Math.random() * .06); b.fired = true;
+    left--; hud(); tone(220 + pull * 300, .12, 'triangle', .06, 120);
+  }
+  pull = 0;
+}
+
+/* 物理 */
+function closest(px, py, s) {
+  const dx = s.x2 - s.x1, dy = s.y2 - s.y1;
+  let t = ((px - s.x1) * dx + (py - s.y1) * dy) / (dx * dx + dy * dy); t = Math.max(0, Math.min(1, t));
+  return [s.x1 + dx * t, s.y1 + dy * t];
+}
+function bounce(b, nx, ny, e, jitter) {
+  const vn = b.vx * nx + b.vy * ny;
+  if (vn < 0) {
+    b.vx -= (1 + e) * vn * nx; b.vy -= (1 + e) * vn * ny;
+    if (jitter) { const j = (Math.random() - .5) * jitter; b.vx += -ny * j; b.vy += nx * j; }
+  }
+  return -vn;
+}
+function step(dt) {
+  for (const b of balls) {
+    b.vy += G * dt;
+    const sp = Math.hypot(b.vx, b.vy); if (sp > 1300) { b.vx *= 1300 / sp; b.vy *= 1300 / sp; }
+    b.x += b.vx * dt; b.y += b.vy * dt;
+    if (b.x > 350) { const pl = PL_TOP + pull * 26 * (b.fired ? 0 : 1); if (b.y + BR > pl) { b.y = pl - BR; if (b.vy > 0) { b.vy = 0; } b.vx = 0; } }
+    if (!b.out && b.x < 338 && b.y < 270) b.out = true;
+    for (const s of walls) {
+      if (s.gate && !b.out) continue;
+      const [cx, cy] = closest(b.x, b.y, s);
+      let nx = b.x - cx, ny = b.y - cy; const d = Math.hypot(nx, ny), R = BR + 1.5;
+      if (d < R && d > 0) { nx /= d; ny /= d; b.x = cx + nx * R; b.y = cy + ny * R; bounce(b, nx, ny, s.e, 0); }
+    }
+    for (const p of pins) {
+      if (Math.abs(p.y - b.y) > 10 || Math.abs(p.x - b.x) > 10) continue;
+      let nx = b.x - p.x, ny = b.y - p.y; const d = Math.hypot(nx, ny), R = BR + PIN_R;
+      if (d < R && d > 0) {
+        nx /= d; ny /= d; b.x = p.x + nx * R; b.y = p.y + ny * R;
+        const v = bounce(b, nx, ny, .45, 40);
+        if (v > 60) { p.f = 1; ding(v / 9000); }
+      }
+    }
+  }
+  // 彈珠互撞
+  for (let i = 0; i < balls.length; i++) for (let j = i + 1; j < balls.length; j++) {
+    const a = balls[i], c = balls[j]; const dx = c.x - a.x, dy = c.y - a.y, d = Math.hypot(dx, dy);
+    if (d < BR * 2 && d > 0) {
+      const nx = dx / d, ny = dy / d, ov = BR * 2 - d;
+      a.x -= nx * ov / 2; a.y -= ny * ov / 2; c.x += nx * ov / 2; c.y += ny * ov / 2;
+      const vr = (a.vx - c.vx) * nx + (a.vy - c.vy) * ny;
+      if (vr > 0) { const J = .9 * vr; a.vx -= J * nx; a.vy -= J * ny; c.vx += J * nx; c.vy += J * ny; }
+    }
+  }
+}
+function update(dt) {
+  time += dt;
+  pins.forEach(p => p.f = Math.max(0, p.f - dt * 5));
+  POCKETS.forEach(p => p.flash = Math.max(0, p.flash - dt * 1.5));
+  popups.forEach(p => { p.t -= dt; p.y -= 28 * dt; }); popups = popups.filter(p => p.t > 0);
+  if (state !== 'play') return;
+  if (charging && inLane()) pull = Math.min(1, pull + dt * 1.1);
+  for (let i = 0; i < 8; i++) step(dt / 8);
+  // 進洞 / 落底
+  balls = balls.filter(b => {
+    for (const p of POCKETS) {
+      if (Math.abs(b.x - p.x) < HW && b.y > p.y - 1 && b.y < p.y + 12) {
+        score += p.pts; p.flash = 1; p.hits = (p.hits || 0) + 1; popups.push({ x: p.x, y: p.y - 12, t: 1.1, s: '+' + p.pts, big: p.pts >= 100 });
+        jingle(p.pts >= 50); if (p.pts >= 100) setMsg('🎉 大獎洞！+100');
+        if (score > hi) { hi = score; try { localStorage.setItem('yeshiPinHi', hi); } catch (e) {} }
+        hud(); return false;
+      }
+    }
+    if (b.y > H + 10) { tone(160, .12, 'triangle', .03); return false; }
+    // 力道不足掉回發射道：退還彈珠
+    if (b.fired && !b.out && b.x > 350 && b.vy >= 0 && b.y >= PL_TOP - BR - 1) { b.fired = false; left++; hud(); setMsg('力道不夠，再拉一次'); }
+    return true;
+  });
+  if (!inLane() && left > 0) { loadT += dt; if (loadT > .25) { load(); loadT = 0; } }
+  if (left === 0 && balls.length === 0) endGame();
+}
+function endGame() {
+  state = 'over'; setMsg('');
+  const tiers = [[300, '🏆', '頭獎！夜市傳說'], [220, '🧸', '中獎！換大娃娃'], [120, '🍭', '小獎！換棒棒糖'], [0, '🙏', '銘謝惠顧']];
+  const t = tiers.find(x => score >= x[0]);
+  document.getElementById('prize').textContent = t[1];
+  document.getElementById('oTitle').textContent = t[2];
+  document.getElementById('oSub').textContent = `總分 ${score}　最高分 ${hi}\n（120 分小獎・220 分中獎・300 分頭獎）`;
+  setTimeout(() => document.getElementById('over').hidden = false, 500);
+}
+
+/* 操作 */
+addEventListener('pointerdown', e => { initAudio(); if (state === 'play' && e.target === cv) charging = true; });
+addEventListener('pointerup', () => { if (charging) { charging = false; launch(); } });
+addEventListener('pointercancel', () => { charging = false; pull = 0; });
+addEventListener('keydown', e => { if ((e.key === ' ' || e.key === 'ArrowDown') && !e.repeat) { e.preventDefault(); initAudio(); if (state === 'play') charging = true; } });
+addEventListener('keyup', e => { if ((e.key === ' ' || e.key === 'ArrowDown') && charging) { charging = false; launch(); } });
+document.getElementById('start').onclick = () => { initAudio(); startGame(); };
+document.getElementById('again').onclick = () => { initAudio(); startGame(); };
+
+/* 背景（預先畫好） */
+const bg = document.createElement('canvas'); bg.width = W * 2; bg.height = H * 2;
+(() => {
+  const g = bg.getContext('2d'); g.scale(2, 2);
+  // 木框
+  const wood = g.createLinearGradient(0, 0, W, 0);
+  wood.addColorStop(0, '#6b3a1e'); wood.addColorStop(.5, '#9a5a2c'); wood.addColorStop(1, '#6b3a1e');
+  g.fillStyle = wood; g.fillRect(0, 0, W, H);
+  for (let i = 0; i < 60; i++) { g.strokeStyle = `rgba(60,30,10,${Math.random() * .25})`; g.lineWidth = Math.random() * 2; const y = Math.random() * H; g.beginPath(); g.moveTo(0, y); g.bezierCurveTo(W / 3, y + 8, W * 2 / 3, y - 8, W, y + 3); g.stroke(); }
+  // 台面形狀
+  g.save(); g.beginPath(); g.moveTo(20, 200); arcPts.forEach(p => g.lineTo(p[0], p[1])); g.lineTo(376, 690); g.lineTo(20, 690); g.closePath(); g.clip();
+  const pf = g.createLinearGradient(0, 20, 0, H);
+  pf.addColorStop(0, '#ffe5ec'); pf.addColorStop(.45, '#fff3c4'); pf.addColorStop(1, '#caf0f8');
+  g.fillStyle = pf; g.fillRect(0, 0, W, H);
+  // 懷舊花紋：星星和圓點
+  const cols = ['#ffafcc', '#bde0fe', '#ffd6a5', '#caffbf', '#d0bfff'];
+  for (let i = 0; i < 90; i++) { g.fillStyle = cols[i % 5]; g.globalAlpha = .55; g.beginPath(); g.arc(Math.random() * W, Math.random() * H, 3 + Math.random() * 9, 0, Math.PI * 2); g.fill(); }
+  g.globalAlpha = 1;
+  function star(x, y, r, c) { g.fillStyle = c; g.beginPath(); for (let i = 0; i < 10; i++) { const a = -Math.PI / 2 + i * Math.PI / 5, rr = i % 2 ? r * .45 : r; g.lineTo(x + Math.cos(a) * rr, y + Math.sin(a) * rr); } g.fill(); }
+  [[60, 120, 12], [320, 130, 10], [40, 340, 9], [330, 360, 11], [120, 630, 8], [300, 520, 8]].forEach(([x, y, r], i) => star(x, y, r, ['#ff006e', '#ffbe0b', '#8338ec', '#3a86ff', '#fb5607', '#06d6a0'][i]));
+  // 招牌字
+  g.font = '900 30px "PingFang TC","Noto Sans TC",system-ui'; g.textAlign = 'center'; g.textBaseline = 'middle';
+  g.lineWidth = 5; g.strokeStyle = '#fff'; g.strokeText('幸運彈珠台', ARC.x - 12, 78);
+  g.fillStyle = '#e63946'; g.fillText('幸運彈珠台', ARC.x - 12, 78);
+  g.font = '700 11px system-ui'; g.fillStyle = '#7a3e00'; g.fillText('★ 一局 10 顆 ★ 大獎等你拿 ★', ARC.x - 12, 104);
+  // 發射道
+  g.fillStyle = 'rgba(120,70,30,.18)'; g.fillRect(350, 220, 26, H - 220);
+  g.restore();
+  // 邊框描邊
+  g.strokeStyle = '#3d1f0c'; g.lineWidth = 4;
+  g.beginPath(); g.moveTo(20, 640); g.lineTo(20, 200); arcPts.forEach(p => g.lineTo(p[0], p[1])); g.lineTo(376, 690); g.stroke();
+  g.lineWidth = 3; g.beginPath(); g.moveTo(350, 245); g.lineTo(350, 690); g.stroke();
+  g.strokeStyle = '#8a5a2b'; g.lineWidth = 3;
+  g.beginPath(); g.moveTo(20, 640); g.lineTo(178, 676); g.moveTo(350, 640); g.lineTo(210, 676); g.stroke();
+  // 底部收珠口
+  g.fillStyle = '#3d1f0c'; g.fillRect(176, 674, 36, 16);
+  g.font = '600 10px system-ui'; g.fillStyle = '#7a3e00'; g.textAlign = 'center'; g.fillText('銘謝惠顧', 194, 655);
+})();
+
+/* 繪圖 */
+function drawPocket(p) {
+  const fl = p.flash;
+  // 鬱金香造型
+  ctx.save();
+  ctx.shadowColor = p.col; ctx.shadowBlur = 6 + fl * 22;
+  ctx.fillStyle = p.col;
+  ctx.beginPath();
+  ctx.moveTo(p.x - HW - 4, p.y - 6);
+  ctx.quadraticCurveTo(p.x - HW - 9, p.y + 8, p.x - HW + 2, p.y + 15);
+  ctx.lineTo(p.x + HW - 2, p.y + 15);
+  ctx.quadraticCurveTo(p.x + HW + 9, p.y + 8, p.x + HW + 4, p.y - 6);
+  ctx.lineTo(p.x + HW, p.y - 6); ctx.lineTo(p.x + HW - 1, p.y + 9); ctx.lineTo(p.x - HW + 1, p.y + 9); ctx.lineTo(p.x - HW, p.y - 6);
+  ctx.closePath(); ctx.fill();
+  ctx.shadowBlur = 0;
+  ctx.fillStyle = fl > .2 ? '#fff' : 'rgba(40,20,10,.75)';
+  ctx.fillRect(p.x - HW + 1, p.y - 2, HW * 2 - 2, 11);
+  ctx.fillStyle = '#fff'; ctx.font = `800 ${p.pts >= 100 ? 11 : 10}px system-ui`; ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
+  ctx.strokeStyle = 'rgba(0,0,0,.5)'; ctx.lineWidth = 3;
+  const t = p.label || p.pts; ctx.strokeText(t, p.x, p.y + 23); ctx.fillText(t, p.x, p.y + 23);
+  ctx.restore();
+}
+function draw() {
+  ctx.setTransform(scale, 0, 0, scale, 0, 0);
+  ctx.drawImage(bg, 0, 0, W, H);
+  // 大獎洞周圍跑馬燈
+  const bp = POCKETS[0];
+  for (let i = 0; i < 12; i++) {
+    const a = i / 12 * Math.PI * 2, on = (Math.floor(time * 8) + i) % 4 === 0;
+    ctx.fillStyle = on ? '#ffd60a' : '#ffd60a44';
+    ctx.beginPath(); ctx.arc(bp.x + Math.cos(a) * 30, bp.y + 5 + Math.sin(a) * 26, 2.6, 0, Math.PI * 2); ctx.fill();
+  }
+  POCKETS.forEach(drawPocket);
+  // 釘子
+  for (const p of pins) {
+    ctx.fillStyle = 'rgba(0,0,0,.22)'; ctx.beginPath(); ctx.arc(p.x + 1.2, p.y + 1.5, PIN_R, 0, Math.PI * 2); ctx.fill();
+    const g = ctx.createRadialGradient(p.x - .8, p.y - .8, .2, p.x, p.y, PIN_R);
+    g.addColorStop(0, '#fff'); g.addColorStop(1, p.f > 0 ? '#ffd166' : '#8d99ae');
+    ctx.fillStyle = g; ctx.beginPath(); ctx.arc(p.x, p.y, PIN_R + p.f, 0, Math.PI * 2); ctx.fill();
+  }
+  // 閘門
+  ctx.strokeStyle = '#3d1f0c88'; ctx.lineWidth = 2; ctx.beginPath(); ctx.moveTo(gate.x1, gate.y1); ctx.lineTo(gate.x2, gate.y2); ctx.stroke();
+  // 拉桿
+  const pl = PL_TOP + pull * 26;
+  ctx.strokeStyle = '#9aa'; ctx.lineWidth = 2; ctx.beginPath();
+  for (let i = 0; i <= 8; i++) ctx.lineTo(i % 2 ? 356 : 370, pl + 4 + i * ((H - pl - 4) / 8));
+  ctx.stroke();
+  ctx.fillStyle = charging ? '#e63946' : '#d9d9d9'; ctx.fillRect(352, pl, 22, 5);
+  if (charging) { ctx.fillStyle = '#e63946'; ctx.fillRect(380, H - 12 - pull * 140, 8, pull * 140); ctx.strokeStyle = '#fff8'; ctx.strokeRect(380, H - 152, 8, 140); }
+  // 彈珠
+  for (const b of balls) {
+    ctx.fillStyle = 'rgba(0,0,0,.25)'; ctx.beginPath(); ctx.arc(b.x + 2, b.y + 2.5, BR, 0, Math.PI * 2); ctx.fill();
+    const g = ctx.createRadialGradient(b.x - 2.2, b.y - 2.4, .5, b.x, b.y, BR);
+    g.addColorStop(0, '#fff'); g.addColorStop(.45, '#d8dde6'); g.addColorStop(1, '#6c7584');
+    ctx.fillStyle = g; ctx.beginPath(); ctx.arc(b.x, b.y, BR, 0, Math.PI * 2); ctx.fill();
+  }
+  // 浮字
+  popups.forEach(p => {
+    ctx.globalAlpha = Math.min(1, p.t * 2); ctx.font = `900 ${p.big ? 24 : 17}px system-ui`; ctx.textAlign = 'center';
+    ctx.lineWidth = 4; ctx.strokeStyle = '#fff'; ctx.strokeText(p.s, p.x, p.y);
+    ctx.fillStyle = p.big ? '#ff006e' : '#e63946'; ctx.fillText(p.s, p.x, p.y); ctx.globalAlpha = 1;
+  });
+  // 玻璃反光
+  const gl = ctx.createLinearGradient(0, 0, W, H);
+  gl.addColorStop(0, 'rgba(255,255,255,0)'); gl.addColorStop(.42, 'rgba(255,255,255,0)'); gl.addColorStop(.47, 'rgba(255,255,255,.13)'); gl.addColorStop(.55, 'rgba(255,255,255,0)');
+  ctx.fillStyle = gl; ctx.fillRect(20, 20, 356, H - 20);
+}
+
+let last = performance.now();
+function loop(t) { const dt = Math.min(.033, (t - last) / 1000); last = t; update(dt); draw(); requestAnimationFrame(loop); }
+hud(); requestAnimationFrame(loop);
+window.__yp_pockets = POCKETS;
+window.__yp = { get balls() { return balls; }, get state() { return state; }, get score() { return score; }, get left() { return left; }, startGame, update, setPull: v => pull = v, launch, pins };
+})();
+</script>
+</body>
+</html>

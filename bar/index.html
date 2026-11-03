@@ -1,0 +1,295 @@
+<!DOCTYPE html>
+<html lang="zh-Hant">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1,maximum-scale=1,user-scalable=no">
+<title>酒吧推酒杯</title>
+<style>
+  html,body{margin:0;height:100%;background:#1a0f0a;color:#fdf2e3;font-family:system-ui,-apple-system,"PingFang TC","Noto Sans TC",sans-serif;overflow:hidden;touch-action:none;user-select:none;-webkit-user-select:none}
+  #app{max-width:520px;margin:0 auto;height:100%;display:flex;flex-direction:column}
+  #hud{display:flex;justify-content:space-between;align-items:center;padding:8px 12px 2px;font-size:11px}
+  #hud b{display:block;font-size:20px;color:#fbbf24;font-variant-numeric:tabular-nums}
+  #tip{text-align:center;font-size:13px;height:18px;color:#fbbf24}
+  #wrap{position:relative;flex:1;min-height:0;display:flex;justify-content:center;align-items:center}
+  canvas{display:block;touch-action:none;border-radius:12px}
+  #ctrl{display:flex;gap:8px;padding:6px 12px 14px}
+  #ctrl button{flex:1;border:2px solid #ffffff22;border-radius:12px;font-size:15px;font-weight:800;color:#fdf2e3;background:#3b2316;padding:9px 2px}
+  #ctrl button span{display:block;font-size:24px}
+  #ctrl button.on{border-color:#fbbf24;background:#5c3720}
+  .ov{position:absolute;inset:0;display:flex;align-items:center;justify-content:center;z-index:5}
+  .box{background:#2a1810f2;border:2px solid #fbbf24;border-radius:16px;padding:20px;width:min(310px,86%);text-align:center}
+  .box h2{margin:0 0 6px;font-size:28px;color:#fbbf24}
+  .box p{font-size:13px;line-height:1.75;margin:6px 0 14px;text-align:left}
+  .go{width:100%;background:#d97706;color:#fff;border:0;border-radius:12px;padding:13px;font-size:17px;font-weight:800}
+  .stats{display:grid;grid-template-columns:1fr 1fr;gap:6px;margin:8px 0 14px}
+  .stats div{background:#0005;border-radius:10px;padding:7px;font-size:11px}
+  .stats b{display:block;font-size:20px;color:#fbbf24}
+  [hidden]{display:none!important}
+</style>
+</head>
+<body>
+<div id="app">
+  <div id="hud">
+    <div>時間<b id="hTime">90</b></div>
+    <div>分數<b id="hScore">0</b></div>
+    <div>連續完美<b id="hCombo">0</b></div>
+    <div style="text-align:right">生氣客人<b id="hAngry">0/5</b></div>
+  </div>
+  <div id="tip"></div>
+  <div id="wrap">
+    <canvas id="c"></canvas>
+    <div class="ov" id="menu"><div class="box">
+      <h2>🍺 酒吧推酒杯</h2>
+      <p>你是酒保！看客人頭上想喝什麼，<b>下方選飲料</b>，然後<b>按住吧台下方往上一滑</b>把杯子推出去。<br>
+      滑越快推越遠，杯子要<b>停在客人面前</b>才算送到，停得越正分數越高。推太大力會飛出吧台摔破！<br>
+      💧 水漬會讓杯子變滑。<br>
+      🔁 客人喝完或拿錯飲料會把杯子滑回來，<b>點一下接住</b>，沒接到會摔破。<br>
+      😡 客人等太久會生氣走掉，<b>5 位生氣就打烊</b>。</p>
+      <button class="go" id="start">開店營業（90 秒）</button>
+    </div></div>
+    <div class="ov" id="over" hidden><div class="box">
+      <h2 id="oTitle"></h2>
+      <div class="stats" id="oStats"></div>
+      <button class="go" id="again">再營業一次</button>
+    </div></div>
+  </div>
+  <div id="ctrl">
+    <button data-d="beer" class="on"><span>🍺</span>啤酒</button>
+    <button data-d="juice"><span>🧃</span>果汁</button>
+    <button data-d="cocktail"><span>🍸</span>雞尾酒</button>
+  </div>
+</div>
+<script>
+(() => {
+const $ = id => document.getElementById(id);
+const W = 400, H = 620, GAME_T = 90, MAX_ANGRY = 5;
+const BAR = { l: 140, r: 260, top: 46, bot: 560 }, CUP_R = 15, LAUNCH_Y = 540;
+const SEATS = [];   // 左右兩排座位
+for (let i = 0; i < 6; i++) { SEATS.push({ y: 90 + i * 74, side: -1 }); SEATS.push({ y: 125 + i * 74, side: 1 }); }
+const DRINK = { beer: { e: '🍺', n: '啤酒', liquid: '#f59e0b', foam: '#fff7e0' }, juice: { e: '🧃', n: '果汁', liquid: '#fb923c', foam: '#fed7aa' }, cocktail: { e: '🍸', n: '雞尾酒', liquid: '#ec4899', foam: '#fbcfe8' } };
+const cv = $('c'), ctx = cv.getContext('2d');
+let scale = 1;
+function resize() {
+  const wr = $('wrap').getBoundingClientRect();
+  const s = Math.min((wr.width - 4) / W, (wr.height - 4) / H), d = window.devicePixelRatio || 1;
+  cv.style.width = W * s + 'px'; cv.style.height = H * s + 'px';
+  cv.width = Math.round(W * s * d); cv.height = Math.round(H * s * d); scale = s * d;
+}
+addEventListener('resize', resize);
+
+/* 音效 */
+let ac = null;
+function initAudio() { if (!ac) { try { ac = new (window.AudioContext || window.webkitAudioContext)(); } catch (e) {} } else if (ac.state === 'suspended') ac.resume(); }
+function tone(f, d, type = 'sine', v = .06, f2, delay = 0) { if (!ac) return; const t = ac.currentTime + delay, o = ac.createOscillator(), g = ac.createGain(); o.type = type; o.frequency.setValueAtTime(f, t); if (f2) o.frequency.exponentialRampToValueAtTime(f2, t + d); g.gain.setValueAtTime(v, t); g.gain.exponentialRampToValueAtTime(.0001, t + d); o.connect(g).connect(ac.destination); o.start(t); o.stop(t + d + .02); }
+function noise(d, v, lp, hp = 0) { if (!ac) return; const n = ac.sampleRate * d, b = ac.createBuffer(1, n, ac.sampleRate), x = b.getChannelData(0); for (let i = 0; i < n; i++) x[i] = (Math.random() * 2 - 1) * Math.pow(1 - i / n, 2); const s = ac.createBufferSource(), f = ac.createBiquadFilter(), g = ac.createGain(); s.buffer = b; f.type = 'lowpass'; f.frequency.value = lp; g.gain.value = v; let nd = s.connect(f); if (hp) { const h = ac.createBiquadFilter(); h.type = 'highpass'; h.frequency.value = hp; nd = nd.connect(h); } nd.connect(g).connect(ac.destination); s.start(); }
+const sSlide = () => noise(.5, .12, 900, 200);
+const sClink = () => { tone(2600, .25, 'sine', .06); tone(3400, .2, 'sine', .04, null, .03); };
+const sBreak = () => { noise(.4, .5, 6000, 1500); for (let i = 0; i < 5; i++) tone(2000 + Math.random() * 2500, .08, 'sine', .04, null, i * .04); };
+const sPour = () => noise(.35, .12, 1200, 400);
+const sAngry = () => tone(180, .4, 'sawtooth', .06, 120);
+const sCheer = () => [660, 880, 1100].forEach((f, i) => tone(f, .12, 'sine', .06, null, i * .07));
+const vib = ms => { try { navigator.vibrate && navigator.vibrate(ms); } catch (e) {} };
+
+/* 狀態 */
+let state = 'menu', t = 0, drink = 'beer', cups = [], customers = [], wets = [], fx = [];
+let score = 0, served = 0, perfects = 0, broken = 0, angry = 0, combo = 0, maxCombo = 0, readyT = 0, spawnT = 0;
+let best = 0; try { best = +localStorage.getItem('barBest') || 0; } catch (e) {}
+function setTip(s) { $('tip').textContent = s; }
+function hud() { $('hTime').textContent = Math.max(0, Math.ceil(GAME_T - t)); $('hScore').textContent = score; $('hCombo').textContent = combo; $('hAngry').textContent = `${angry}/${MAX_ANGRY}`; }
+document.querySelectorAll('#ctrl button').forEach(b => b.onclick = () => { drink = b.dataset.d; document.querySelectorAll('#ctrl button').forEach(x => x.classList.toggle('on', x === b)); initAudio(); sPour(); });
+function startGame() {
+  cups = []; customers = []; fx = []; t = 0; score = served = perfects = broken = angry = combo = maxCombo = 0; readyT = 0; spawnT = .5;
+  wets = [];
+  state = 'play'; $('menu').hidden = true; $('over').hidden = true; setTip('看客人頭上的飲料，選好再往上滑推出去'); hud();
+}
+function spawnCustomer() {
+  const free = SEATS.filter(s => !customers.some(c => c.seat === s));
+  if (!free.length) return;
+  const seat = free[(Math.random() * free.length) | 0], late = t / GAME_T;
+  const kinds = Object.keys(DRINK), want = kinds[(Math.random() * (late > .2 ? 3 : 2)) | 0];
+  const pat = Math.max(7, 15 - late * 7);
+  customers.push({ seat, want, pat, max: pat, state: 'wait', tm: 0, hair: ['#3f2a1a', '#111827', '#a16207', '#7c2d12', '#6b7280'][(Math.random() * 5) | 0], shirt: ['#2563eb', '#16a34a', '#db2777', '#7c3aed', '#ea580c'][(Math.random() * 5) | 0], enter: 0 });
+}
+
+/* 推杯 */
+const toLocal = e => { const r = cv.getBoundingClientRect(); return { x: (e.clientX - r.left) / r.width * W, y: (e.clientY - r.top) / r.height * H }; };
+let swipe = null;
+cv.addEventListener('pointerdown', e => {
+  initAudio(); if (state !== 'play') return;
+  const q = toLocal(e);
+  // 先看是不是要接回滑過來的杯子
+  const back = cups.find(c => c.dir > 0 && !c.done && Math.hypot(c.x - q.x, c.y - q.y) < 40);
+  if (back) { back.done = true; back.caught = true; score += 5; sClink(); fx.push({ x: back.x, y: back.y - 20, t: .8, s: '接住！+5', col: '#a7f3d0' }); hud(); return; }
+  try { cv.setPointerCapture(e.pointerId); } catch (er) {}
+  swipe = { id: e.pointerId, pts: [{ x: q.x, y: q.y, t: performance.now() }] };
+});
+cv.addEventListener('pointermove', e => { if (!swipe || e.pointerId !== swipe.id) return; const q = toLocal(e); swipe.pts.push({ x: q.x, y: q.y, t: performance.now() }); if (swipe.pts.length > 12) swipe.pts.shift(); });
+cv.addEventListener('pointerup', e => {
+  if (!swipe || e.pointerId !== swipe.id) return;
+  const q = toLocal(e), now = performance.now(); swipe.pts.push({ x: q.x, y: q.y, t: now });
+  const first = swipe.pts.find(p => now - p.t < 140) || swipe.pts[0], dt = Math.max(.03, (now - first.t) / 1000);
+  const vy = (first.y - q.y) / dt, vx = (q.x - first.x) / dt; swipe = null;
+  if (state !== 'play') return;
+  if (vy < 120) { setTip('要往上滑才推得出去喔'); return; }
+  if (readyT > 0) { setTip('下一杯還在倒…'); return; }
+  const v = Math.min(1050, vy * .75);
+  cups.push({ x: 200, y: LAUNCH_Y, vy: -v, vx: Math.max(-40, Math.min(40, vx * .05)), dir: -1, drink, done: false, rest: 0, spin: 0 });
+  readyT = .45; sSlide(); hud();
+});
+
+/* 更新 */
+function update(dt) {
+  fx.forEach(f => { f.t -= dt; if (f.vx !== undefined) { f.x += f.vx * dt; f.y += f.vy * dt; f.vy += 500 * dt; } }); fx = fx.filter(f => f.t > 0);
+  if (state !== 'play') return;
+  t += dt; readyT = Math.max(0, readyT - dt);
+  // 客人
+  spawnT -= dt;
+  const maxC = Math.min(9, 2 + Math.floor(t / 12));
+  if (spawnT <= 0) { if (customers.filter(c => c.state !== 'leave').length < maxC) spawnCustomer(); spawnT = Math.max(1.4, 4 - t * .03) * (.7 + Math.random() * .6); }
+  if (Math.random() < dt * .08 && wets.length < 3) wets.push({ y: 140 + Math.random() * 330, r: 22 + Math.random() * 10, t: 14 });
+  wets.forEach(w => w.t -= dt); wets = wets.filter(w => w.t > 0);
+  for (const c of customers) {
+    c.enter = Math.min(1, c.enter + dt * 3); c.tm += dt;
+    if (c.state === 'wait') {
+      c.pat -= dt;
+      if (c.pat <= 0) { c.state = 'leave'; c.tm = 0; angry++; combo = 0; score = Math.max(0, score - 20); sAngry(); vib(80); fx.push({ x: seatX(c), y: c.seat.y - 30, t: 1.2, s: '😡 等太久了！-20', col: '#f87171' }); hud(); if (angry >= MAX_ANGRY) { endGame(); return; } }
+    } else if (c.state === 'drink') {
+      if (c.tm > 2.4) { // 喝完把空杯滑回來
+        c.state = 'leave'; c.tm = 0;
+        cups.push({ x: 200, y: c.seat.y, vy: 120 + t * 1.2, vx: 0, dir: 1, drink: c.want, empty: true, done: false, spin: 0 });
+      }
+    } else if (c.state === 'leave') { c.enter = Math.max(0, 1 - c.tm * 2); }
+  }
+  customers = customers.filter(c => !(c.state === 'leave' && c.tm > .6));
+  // 杯子
+  for (const cp of cups) {
+    if (cp.done) continue;
+    cp.spin += dt * (cp.dir < 0 ? -cp.vy / 60 : 3);
+    if (cp.dir < 0) {
+      const wet = wets.some(w => Math.abs(w.y - cp.y) < w.r);
+      const dec = wet ? 110 : 330;
+      cp.vy = Math.min(0, cp.vy + dec * dt); cp.y += cp.vy * dt; cp.x += cp.vx * dt; cp.x = Math.max(BAR.l + CUP_R, Math.min(BAR.r - CUP_R, cp.x));
+      if (cp.y < BAR.top) { cp.done = true; broken++; combo = 0; score = Math.max(0, score - 10); sBreak(); vib(60); shards(cp.x, BAR.top - 8); fx.push({ x: cp.x, y: BAR.top + 30, t: 1.2, s: '太大力，摔破了！', col: '#f87171' }); setTip('力道小一點'); hud(); continue; }
+      if (cp.vy === 0) {   // 停下：找面前的客人
+        cp.done = true;
+        let bestC = null, bd = 1e9;
+        for (const c of customers) if (c.state === 'wait') { const d = Math.abs(c.seat.y - cp.y); if (d < bd) { bd = d; bestC = c; } }
+        if (bestC && bd < 30) {
+          if (bestC.want !== cp.drink) {
+            fx.push({ x: seatX(bestC), y: bestC.seat.y - 30, t: 1.2, s: `我要${DRINK[bestC.want].n}啦！`, col: '#fca5a5' }); combo = 0;
+            cups.push({ x: 200, y: cp.y, vy: 140, vx: 0, dir: 1, drink: cp.drink, done: false, spin: 0 }); setTip('拿錯飲料了，接住退回來的杯子');
+          } else {
+            const perfect = bd < 7, gain = 10 + Math.round((30 - bd) / 30 * 20) + (perfect ? 10 : 0) + Math.round(bestC.pat / bestC.max * 10);
+            score += gain; served++; bestC.state = 'drink'; bestC.tm = 0; sClink(); sCheer();
+            if (perfect) { perfects++; combo++; maxCombo = Math.max(maxCombo, combo); } else combo = 0;
+            fx.push({ x: seatX(bestC), y: bestC.seat.y - 30, t: 1, s: (perfect ? '完美！' : '送到！') + ` +${gain}`, col: perfect ? '#fde047' : '#fff' });
+            bestC.cup = cp.drink;
+          }
+        } else { cp.done = true; cp.lost = 1; combo = 0; fx.push({ x: cp.x, y: cp.y - 22, t: 1, s: bestC ? '差一點…沒停在客人前面' : '這裡沒有客人', col: '#fdba74' }); setTip('杯子要停在客人旁邊'); }
+        hud();
+      }
+    } else {
+      cp.y += cp.vy * dt;
+      if (cp.y > BAR.bot + 30) { cp.done = true; broken++; combo = 0; score = Math.max(0, score - 10); sBreak(); vib(60); shards(cp.x, BAR.bot + 30); fx.push({ x: cp.x, y: BAR.bot, t: 1.2, s: '沒接到，摔破了！-10', col: '#f87171' }); hud(); }
+    }
+  }
+  cups = cups.filter(c => !c.done || (c.lost && (c.lost -= dt) > 0));
+  if (t >= GAME_T) endGame();
+  hud();
+}
+function shards(x, y) { for (let i = 0; i < 12; i++) fx.push({ shard: 1, x, y, vx: (Math.random() - .5) * 260, vy: -Math.random() * 200, t: .8 }); }
+function seatX(c) { return c.seat.side < 0 ? BAR.l - 44 : BAR.r + 44; }
+function endGame() {
+  state = 'over';
+  if (score > best) { best = score; try { localStorage.setItem('barBest', best); } catch (e) {} }
+  $('oTitle').textContent = angry >= MAX_ANGRY ? '客人都氣跑了，提早打烊 😵' : score >= 900 ? '傳奇酒保！🏆' : score >= 500 ? '熟練酒保 🍻' : '見習酒保 🙂';
+  $('oStats').innerHTML = `<div>分數<b>${score}</b></div><div>送達<b>${served} 杯</b></div><div>完美<b>${perfects} 杯</b></div><div>最多連續完美<b>${maxCombo}</b></div><div>打破<b>${broken} 個</b></div><div>最高分<b>${best}</b></div>`;
+  setTimeout(() => $('over').hidden = false, 400); hud();
+}
+$('start').onclick = () => { initAudio(); startGame(); };
+$('again').onclick = () => { initAudio(); startGame(); };
+
+/* 繪圖 */
+function drawCup(x, y, kind, empty, spin, sc = 1) {
+  const D = DRINK[kind];
+  ctx.save(); ctx.translate(x, y); ctx.scale(sc, sc);
+  ctx.fillStyle = 'rgba(0,0,0,.3)'; ctx.beginPath(); ctx.ellipse(3, 4, CUP_R, CUP_R * .9, 0, 0, 7); ctx.fill();
+  if (kind === 'cocktail') {
+    ctx.rotate(spin * .2);
+    ctx.fillStyle = 'rgba(255,255,255,.55)'; ctx.beginPath(); ctx.arc(0, 0, CUP_R, 0, 7); ctx.fill();
+    if (!empty) { ctx.fillStyle = D.liquid; ctx.beginPath(); ctx.arc(0, 0, CUP_R - 3, 0, 7); ctx.fill(); ctx.fillStyle = '#65a30d'; ctx.beginPath(); ctx.arc(4, -3, 3.5, 0, 7); ctx.fill(); ctx.strokeStyle = '#7c2d12'; ctx.lineWidth = 1.5; ctx.beginPath(); ctx.moveTo(4, -3); ctx.lineTo(-6, 7); ctx.stroke(); }
+  } else {
+    ctx.fillStyle = '#e5e7eb'; ctx.beginPath(); ctx.arc(0, 0, CUP_R, 0, 7); ctx.fill();
+    ctx.fillStyle = empty ? 'rgba(200,220,230,.6)' : D.liquid; ctx.beginPath(); ctx.arc(0, 0, CUP_R - 3, 0, 7); ctx.fill();
+    if (!empty) { ctx.fillStyle = D.foam; ctx.beginPath(); ctx.arc(0, 0, CUP_R - 5, 0, 7); ctx.fill(); ctx.fillStyle = 'rgba(255,255,255,.7)'; for (let i = 0; i < 4; i++) { const a = spin + i * 1.6; ctx.beginPath(); ctx.arc(Math.cos(a) * 5, Math.sin(a) * 5, 2, 0, 7); ctx.fill(); } }
+    if (kind === 'juice' && !empty) { ctx.strokeStyle = '#16a34a'; ctx.lineWidth = 2.5; ctx.beginPath(); ctx.moveTo(-2, -2); ctx.lineTo(6, -12); ctx.stroke(); }
+    ctx.rotate(spin); ctx.fillStyle = '#cbd5e1'; ctx.fillRect(CUP_R - 2, -4, 8, 8);   // 把手
+  }
+  ctx.restore();
+}
+function drawCustomer(c) {
+  const x = seatX(c), y = c.seat.y, s = c.seat.side, k = c.enter;
+  ctx.save(); ctx.globalAlpha = k; ctx.translate(x + s * (1 - k) * 40, y);
+  // 高腳椅
+  ctx.fillStyle = '#7c2d12'; ctx.beginPath(); ctx.arc(s * 6, 4, 20, 0, 7); ctx.fill(); ctx.fillStyle = '#9a3412'; ctx.beginPath(); ctx.arc(s * 6, 4, 15, 0, 7); ctx.fill();
+  // 肩膀
+  ctx.fillStyle = c.shirt; ctx.beginPath(); ctx.ellipse(0, 0, 13, 22, 0, 0, 7); ctx.fill();
+  // 手伸向吧台
+  ctx.strokeStyle = '#f1c27d'; ctx.lineWidth = 6; ctx.lineCap = 'round'; ctx.beginPath(); ctx.moveTo(-s * 6, -12); ctx.lineTo(-s * 24, -16); ctx.moveTo(-s * 6, 12); ctx.lineTo(-s * 24, 14); ctx.stroke();
+  // 頭（俯視）
+  ctx.fillStyle = '#f1c27d'; ctx.beginPath(); ctx.arc(-s * 2, 0, 12, 0, 7); ctx.fill();
+  ctx.fillStyle = c.hair; ctx.beginPath(); ctx.arc(s * 1, 0, 11.5, 0, 7); ctx.fill();
+  ctx.restore();
+  if (c.state === 'wait' && k > .9) {
+    const bx = x + (s < 0 ? -2 : 2), by = y - 40;
+    ctx.fillStyle = c.pat < c.max * .3 ? '#fecaca' : '#fff'; ctx.beginPath(); ctx.roundRect(bx - 20, by - 18, 40, 30, 10); ctx.fill();
+    ctx.beginPath(); ctx.moveTo(bx - 4, by + 12); ctx.lineTo(bx, by + 20); ctx.lineTo(bx + 4, by + 12); ctx.fill();
+    ctx.font = '20px system-ui'; ctx.textAlign = 'center'; ctx.textBaseline = 'middle'; ctx.fillText(DRINK[c.want].e, bx, by - 3); ctx.textBaseline = 'alphabetic';
+    ctx.fillStyle = '#0006'; ctx.fillRect(bx - 18, by + 23, 36, 4); ctx.fillStyle = c.pat < c.max * .3 ? '#ef4444' : '#22c55e'; ctx.fillRect(bx - 18, by + 23, 36 * Math.max(0, c.pat / c.max), 4);
+    if (c.pat < c.max * .3) { ctx.font = '14px system-ui'; ctx.textAlign = 'center'; ctx.fillText('💢', bx + 22, by - 16); }
+  }
+  if (c.state === 'drink') { drawCup(200 + c.seat.side * 22, y, c.want, false, 0, .9); ctx.font = '14px system-ui'; ctx.textAlign = 'center'; ctx.fillText('😋', x, y - 30); }
+}
+function draw() {
+  ctx.setTransform(scale, 0, 0, scale, 0, 0);
+  // 地板與燈光
+  ctx.fillStyle = '#2b1a12'; ctx.fillRect(0, 0, W, H);
+  for (let y = 0; y < H; y += 30) { ctx.fillStyle = (y / 30) % 2 ? '#2f1d14' : '#281810'; ctx.fillRect(0, y, W, 30); }
+  for (const [x, y] of [[60, 160], [340, 300], [60, 460]]) { const g = ctx.createRadialGradient(x, y, 5, x, y, 140); g.addColorStop(0, 'rgba(251,191,36,.18)'); g.addColorStop(1, 'rgba(251,191,36,0)'); ctx.fillStyle = g; ctx.fillRect(x - 140, y - 140, 280, 280); }
+  // 吧台
+  ctx.fillStyle = '#3b1f10'; ctx.fillRect(BAR.l - 8, BAR.top - 18, BAR.r - BAR.l + 16, BAR.bot - BAR.top + 60);
+  const wood = ctx.createLinearGradient(BAR.l, 0, BAR.r, 0); wood.addColorStop(0, '#8b5a2b'); wood.addColorStop(.5, '#b07a45'); wood.addColorStop(1, '#8b5a2b');
+  ctx.fillStyle = wood; ctx.fillRect(BAR.l, BAR.top - 10, BAR.r - BAR.l, BAR.bot - BAR.top + 50);
+  ctx.strokeStyle = 'rgba(70,40,20,.35)'; ctx.lineWidth = 1.2; for (let k = 0; k < 7; k++) { ctx.beginPath(); for (let y = BAR.top; y <= BAR.bot + 40; y += 20) { const x = BAR.l + 12 + k * 16 + Math.sin(y / 40 + k) * 4; y === BAR.top ? ctx.moveTo(x, y) : ctx.lineTo(x, y); } ctx.stroke(); }
+  ctx.fillStyle = '#5c3720'; ctx.fillRect(BAR.l - 8, BAR.top - 18, BAR.r - BAR.l + 16, 8);   // 吧台盡頭
+  ctx.fillStyle = '#fbbf2455'; ctx.font = '700 10px system-ui'; ctx.textAlign = 'center'; ctx.fillText('— 吧台盡頭 —', 200, BAR.top + 4);
+  // 水漬
+  for (const w of wets) { ctx.fillStyle = `rgba(147,197,253,${Math.min(.45, w.t * .1)})`; ctx.beginPath(); ctx.ellipse(200, w.y, BAR.r - BAR.l - 20 > 0 ? (BAR.r - BAR.l) / 2 - 6 : 40, w.r * .6, 0, 0, 7); ctx.fill(); ctx.fillStyle = `rgba(255,255,255,${Math.min(.5, w.t * .1)})`; ctx.font = '11px system-ui'; ctx.fillText('💧 滑', 240, w.y + 4); }
+  // 座位區的停杯提示線
+  for (const c of customers) if (c.state === 'wait' && c.enter > .9) { ctx.strokeStyle = 'rgba(253,230,138,.35)'; ctx.setLineDash([5, 5]); ctx.lineWidth = 1.5; ctx.beginPath(); ctx.moveTo(BAR.l + 4, c.seat.y); ctx.lineTo(BAR.r - 4, c.seat.y); ctx.stroke(); ctx.setLineDash([]); }
+  customers.forEach(drawCustomer);
+  for (const cp of cups) { if (cp.done && !cp.lost) continue; ctx.globalAlpha = cp.lost ? Math.max(0, cp.lost) : 1; drawCup(cp.x, cp.y, cp.drink, cp.empty || cp.dir > 0, cp.spin); ctx.globalAlpha = 1;
+    if (cp.dir > 0 && !cp.done) { ctx.strokeStyle = `rgba(167,243,208,${.5 + .4 * Math.sin(t * 12)})`; ctx.lineWidth = 2.5; ctx.beginPath(); ctx.arc(cp.x, cp.y, CUP_R + 8, 0, 7); ctx.stroke(); } }
+  // 酒保與準備中的杯子
+  ctx.fillStyle = '#111827'; ctx.beginPath(); ctx.ellipse(200, 600, 40, 22, 0, Math.PI, 0); ctx.fill();
+  ctx.fillStyle = '#f1c27d'; ctx.beginPath(); ctx.arc(200, 588, 13, 0, 7); ctx.fill(); ctx.fillStyle = '#1f2937'; ctx.beginPath(); ctx.arc(200, 590, 12, Math.PI * 1.1, Math.PI * 1.9); ctx.fill();
+  ctx.fillStyle = '#dc2626'; ctx.beginPath(); ctx.moveTo(195, 602); ctx.lineTo(205, 602); ctx.lineTo(200, 609); ctx.fill();
+  if (state === 'play') {
+    if (readyT <= 0) { drawCup(200, LAUNCH_Y, drink, false, t, 1); ctx.fillStyle = '#fde68aaa'; ctx.font = '700 11px system-ui'; ctx.textAlign = 'center'; ctx.fillText('↑ 往上滑推出去', 200, LAUNCH_Y - 26 + Math.sin(t * 5) * 2); }
+    else { ctx.fillStyle = '#fde68a88'; ctx.font = '11px system-ui'; ctx.textAlign = 'center'; ctx.fillText('倒酒中…', 200, LAUNCH_Y); }
+  }
+  for (const f of fx) {
+    if (f.shard) { ctx.fillStyle = `rgba(220,240,255,${f.t})`; ctx.fillRect(f.x, f.y, 3, 3); }
+    else { ctx.globalAlpha = Math.min(1, f.t * 2); ctx.font = '900 15px system-ui'; ctx.textAlign = 'center'; ctx.lineWidth = 4; ctx.strokeStyle = '#000'; ctx.strokeText(f.s, f.x, f.y - (1 - f.t) * 18); ctx.fillStyle = f.col; ctx.fillText(f.s, f.x, f.y - (1 - f.t) * 18); ctx.globalAlpha = 1; }
+  }
+  if (state === 'play' && GAME_T - t < 10) { ctx.fillStyle = `rgba(239,68,68,${.25 + .15 * Math.sin(t * 12)})`; ctx.fillRect(0, 0, W, 5); }
+}
+
+let last = performance.now();
+function loop(now) { const dt = Math.min(.033, (now - last) / 1000); last = now; update(dt); draw(); requestAnimationFrame(loop); }
+resize(); hud(); requestAnimationFrame(loop);
+window.__bar = { get cups() { return cups; }, get customers() { return customers; }, get state() { return state; }, get score() { return score; }, get served() { return served; }, setDrink: d => { drink = d; }, startGame, seatX };
+})();
+</script>
+</body>
+</html>

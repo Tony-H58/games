@@ -1,0 +1,533 @@
+<!DOCTYPE html>
+<html lang="zh-Hant">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1,maximum-scale=1,user-scalable=no">
+<title>保齡球比賽</title>
+<style>
+  html,body{margin:0;height:100%;background:#0b0f1e;color:#fff;font-family:system-ui,-apple-system,"PingFang TC","Noto Sans TC",sans-serif;overflow:hidden;touch-action:none;user-select:none;-webkit-user-select:none}
+  #app{max-width:520px;margin:0 auto;height:100%;display:flex;flex-direction:column}
+  #sheet{margin:6px 6px 0;background:#111827;border:1px solid #374151;border-radius:8px;padding:3px;font-size:10px}
+  .row{display:grid;grid-template-columns:34px repeat(9,1fr) 1.45fr;gap:1px;margin:1px 0}
+  .row.cur .nm{color:#fde047}
+  .nm{display:flex;align-items:center;justify-content:center;font-weight:800;font-size:11px}
+  .fr{background:#1f2937;border-radius:3px;min-height:30px;display:flex;flex-direction:column}
+  .fr.now{outline:1.5px solid #fde047}
+  .rl{display:flex;justify-content:flex-end;height:13px}
+  .rl span{min-width:11px;text-align:center;border-left:1px solid #374151;border-bottom:1px solid #374151;font-weight:800;line-height:13px}
+  .rl span.x{color:#f87171}.rl span.s{color:#60a5fa}
+  .tt{flex:1;display:flex;align-items:center;justify-content:center;font-size:12px;font-weight:800;font-variant-numeric:tabular-nums}
+  .hd{display:grid;grid-template-columns:34px repeat(9,1fr) 1.45fr;gap:1px;color:#9ca3af;text-align:center;font-size:9px}
+  #tip{text-align:center;font-size:13px;height:18px;color:#fde047;margin-top:3px}
+  #wrap{position:relative;flex:1;min-height:0;display:flex;justify-content:center;align-items:center;padding-bottom:8px}
+  canvas{display:block;touch-action:none;border-radius:10px}
+  .ov{position:absolute;inset:0;display:flex;align-items:center;justify-content:center;z-index:5}
+  .box{background:#141b33f2;border:2px solid #60a5fa;border-radius:16px;padding:18px;width:min(320px,88%);text-align:center}
+  .box h2{margin:0 0 6px;font-size:27px;color:#fde047}
+  .box p{font-size:12.5px;line-height:1.75;margin:6px 0 12px;text-align:left}
+  .lv{display:grid;grid-template-columns:1fr 1fr;gap:6px;margin-bottom:10px}
+  .lv button{border:2px solid #ffffff22;border-radius:10px;background:#1e2a4f;color:#fff;font-size:14px;font-weight:800;padding:8px 2px}
+  .lv button small{display:block;font-size:10px;font-weight:400;color:#bfdbfe;margin-top:2px}
+  .lv button.on{border-color:#fde047;background:#2d3f78}
+  .go{width:100%;background:#2563eb;color:#fff;border:0;border-radius:12px;padding:13px;font-size:17px;font-weight:800}
+  .stats{display:grid;grid-template-columns:1fr 1fr;gap:6px;margin:8px 0 14px}
+  .stats div{background:#0006;border-radius:10px;padding:7px;font-size:11px}
+  .stats b{display:block;font-size:19px;color:#fde047}
+  #rec{font-size:11px;color:#bfdbfe;margin-bottom:10px}
+  [hidden]{display:none!important}
+</style>
+</head>
+<body>
+<div id="app">
+  <div id="sheet"></div>
+  <div id="tip"></div>
+  <div id="wrap">
+    <canvas id="c"></canvas>
+    <div class="ov" id="menu"><div class="box">
+      <h2>🎳 保齡球比賽</h2>
+      <p>① <b>左右拖曳</b>球，選站位。<br>
+      ② <b>往上一滑</b>把球丟出去：滑越快球越快，<b>斜著滑</b>會斜著走。<br>
+      ③ 滑到最後<b>手指往左或右彎</b>，球會帶旋轉，後段<b>轉彎</b>（曲球）。<br>
+      🎯 瞄準 1 號瓶旁邊的<b>口袋位置</b>最容易全倒！<br>
+      正式計分：10 格、全倒／補中有加分，滿分 300。</p>
+      <div class="lv" id="lv">
+        <button data-m="-1" class="on">🎳 單人練習<small>自己打一局</small></button>
+        <button data-m="0">🟢 對戰初級<small>常洗溝</small></button>
+        <button data-m="1">🟡 對戰中級<small>穩定一百多分</small></button>
+        <button data-m="2">🔴 對戰高手<small>很會打全倒</small></button>
+      </div>
+      <div id="rec"></div>
+      <button class="go" id="start">開始比賽</button>
+    </div></div>
+    <div class="ov" id="over" hidden><div class="box">
+      <h2 id="oTitle"></h2>
+      <div class="stats" id="oStats"></div>
+      <button class="go" id="again">再打一局</button>
+    </div></div>
+  </div>
+</div>
+<script>
+(() => {
+const $ = id => document.getElementById(id);
+const W = 400, H = 640;
+/* 世界座標（公分）：x 左右、y 往前；犯規線 y=0，1 號瓶 y=1800 */
+const LANE = 53.3, GUT = 23, BALL_R = 11, PIN_R = 6, PIN_DOWN_R = 8, HEAD_Y = 1800, ROW = 26.4, PIT_Y = HEAD_Y + 3 * ROW + 60, OIL = 1000;
+const PIN_POS = [[0, 0], [-15.24, 1], [15.24, 1], [-30.48, 2], [0, 2], [30.48, 2], [-45.72, 3], [-15.24, 3], [15.24, 3], [45.72, 3]];
+const D0 = 800, K = 2.6, HZ = 20, BOT = 610;
+const AI = [
+  { name: '初級', noise: 16, spin: 0, spd: [600, 760], spareNoise: 14 },
+  { name: '中級', noise: 7, spin: -60, spd: [700, 840], spareNoise: 7 },
+  { name: '高手', noise: 3.2, spin: -110, spd: [760, 880], spareNoise: 3.5 },
+];
+const cv = $('c'), ctx = cv.getContext('2d');
+let scale = 1;
+function resize() {
+  const wr = $('wrap').getBoundingClientRect();
+  const s = Math.min((wr.width - 4) / W, (wr.height - 4) / H), d = window.devicePixelRatio || 1;
+  cv.style.width = W * s + 'px'; cv.style.height = H * s + 'px';
+  cv.width = Math.round(W * s * d); cv.height = Math.round(H * s * d); scale = s * d;
+}
+addEventListener('resize', resize);
+
+/* 音效 */
+let ac = null, rollNode = null;
+function initAudio() { if (!ac) { try { ac = new (window.AudioContext || window.webkitAudioContext)(); } catch (e) {} } else if (ac.state === 'suspended') ac.resume(); }
+function tone(f, d, type = 'sine', v = .08, f2, delay = 0) { if (!ac) return; const t = ac.currentTime + delay, o = ac.createOscillator(), g = ac.createGain(); o.type = type; o.frequency.setValueAtTime(f, t); if (f2) o.frequency.exponentialRampToValueAtTime(f2, t + d); g.gain.setValueAtTime(v, t); g.gain.exponentialRampToValueAtTime(.0001, t + d); o.connect(g).connect(ac.destination); o.start(t); o.stop(t + d + .02); }
+function noise(d, v, lp, hp = 0, delay = 0) { if (!ac) return; const n = ac.sampleRate * d, b = ac.createBuffer(1, n, ac.sampleRate), x = b.getChannelData(0); for (let i = 0; i < n; i++) x[i] = (Math.random() * 2 - 1) * Math.pow(1 - i / n, 2); const s = ac.createBufferSource(), f = ac.createBiquadFilter(), g = ac.createGain(); s.buffer = b; f.type = 'lowpass'; f.frequency.value = lp; g.gain.value = v; let nd = s.connect(f); if (hp) { const h = ac.createBiquadFilter(); h.type = 'highpass'; h.frequency.value = hp; nd = nd.connect(h); } nd.connect(g).connect(ac.destination); s.start(ac.currentTime + delay); }
+function rollStart() {
+  if (!ac || rollNode) return;
+  const n = ac.sampleRate * 2, b = ac.createBuffer(1, n, ac.sampleRate), x = b.getChannelData(0); for (let i = 0; i < n; i++) x[i] = Math.random() * 2 - 1;
+  const s = ac.createBufferSource(), f = ac.createBiquadFilter(), g = ac.createGain(); s.buffer = b; s.loop = true; f.type = 'lowpass'; f.frequency.value = 180; g.gain.value = .22;
+  s.connect(f).connect(g).connect(ac.destination); s.start(); rollNode = { s, g };
+}
+function rollStop() { if (rollNode) { try { rollNode.g.gain.exponentialRampToValueAtTime(.001, ac.currentTime + .3); rollNode.s.stop(ac.currentTime + .35); } catch (e) {} rollNode = null; } }
+let clackT = 0;
+function clack(v) { if (!ac || time - clackT < .03) return; clackT = time; noise(.09, Math.min(.35, .06 + v / 2500), 4200, 700); tone(900 + Math.random() * 600, .05, 'triangle', Math.min(.08, v / 9000)); }
+const sStrike = () => { [523, 659, 784, 1047].forEach((f, i) => tone(f, .16, 'sine', .08, null, i * .08)); noise(1.2, .18, 2500, 300, .2); };
+const sSpare = () => [659, 880].forEach((f, i) => tone(f, .16, 'sine', .08, null, i * .1));
+const sGutter = () => tone(160, .4, 'sawtooth', .05, 90);
+const vib = ms => { try { navigator.vibrate && navigator.vibrate(ms); } catch (e) {} };
+
+/* 狀態 */
+let mode = -1, Lv = null;
+let best = {}; try { best = JSON.parse(localStorage.getItem('bowlBest')) || {}; } catch (e) {}
+const recText = () => $('rec').textContent = `最佳分數　練習 ${best['-1'] || '—'}　對戰勝場 初${best.w0 || 0}／中${best.w1 || 0}／高${best.w2 || 0}`;
+recText();
+document.querySelectorAll('#lv button').forEach(b => b.onclick = () => { mode = +b.dataset.m; document.querySelectorAll('#lv button').forEach(x => x.classList.toggle('on', x === b)); });
+
+let state = 'menu', time = 0, camY = 0, turn = 'P', players = [], pins = [], ball = null, aimX = 0, throwT = 0, pauseT = 0, fx = [], banner = null, aiT = 0;
+const P = () => players.find(p => p.id === turn);
+function newRack() { pins = PIN_POS.map(([x, r], i) => ({ n: i + 1, x, y: HEAD_Y + r * ROW, vx: 0, vy: 0, st: 'up', rot: 0, wob: 0 })); }
+function standing() { return pins.filter(p => p.st === 'up'); }
+
+function startGame() {
+  Lv = mode >= 0 ? AI[mode] : null;
+  players = [{ id: 'P', name: '你', frames: [[]], streak: 0, strikes: 0, spares: 0 }];
+  if (Lv) players.push({ id: 'A', name: '電腦', frames: [[]], streak: 0, strikes: 0, spares: 0 });
+  turn = 'P'; fx = []; banner = null; newRack(); pinsUpBefore = 10; aimX = 0; camY = 0;
+  $('menu').hidden = true; $('over').hidden = true;
+  beginTurn(); renderSheet();
+}
+function beginTurn() {
+  ball = null; camY = 0; throwT = 0;
+  if (turn === 'P') { state = 'aim'; setTip(ballNo() === 0 ? '左右拖曳選位置，往上滑出球' : `補中！還剩 ${standing().length} 支`); }
+  else { state = 'ai'; aiT = .9; setTip('電腦準備出球…'); }
+}
+function ballNo() { const p = P(); return p.frames[p.frames.length - 1].length; }
+function setTip(s) { $('tip').textContent = s; }
+
+/* 計分 */
+function scoreFrames(frames) {
+  const rolls = frames.flat(), out = []; let i = 0, total = 0;
+  for (let f = 0; f < 10; f++) {
+    const fr = frames[f]; if (!fr || !fr.length) break;
+    if (rolls[i] === 10) { if (rolls[i + 2] === undefined) { out.push(null); break; } total += 10 + rolls[i + 1] + rolls[i + 2]; i += 1; }
+    else if (rolls[i + 1] === undefined) { out.push(null); break; }
+    else if (rolls[i] + rolls[i + 1] === 10) { if (rolls[i + 2] === undefined) { out.push(null); break; } total += 10 + rolls[i + 2]; i += 2; }
+    else { total += rolls[i] + rolls[i + 1]; i += 2; }
+    out.push(total);
+    if (f === 9) break;
+  }
+  return out;
+}
+function marks(fr, f) {
+  const m = [];
+  for (let k = 0; k < fr.length; k++) {
+    const v = fr[k];
+    if (f < 9) { if (k === 0 && v === 10) { m.push(['', ''], ['X', 'x']); break; } if (k === 1 && fr[0] + v === 10) m.push(['/', 's']); else m.push([v === 0 ? '-' : v, '']); }
+    else {
+      const prev = fr[k - 1];
+      const fresh = k === 0 || prev === 10 || (k === 2 && fr[0] + fr[1] === 10 && fr[0] !== 10) || (k === 2 && fr[0] === 10 && fr[1] === 10);
+      if (v === 10 && fresh) m.push(['X', 'x']);
+      else if (!fresh && prev + v === 10) m.push(['/', 's']);
+      else m.push([v === 0 ? '-' : v, '']);
+    }
+  }
+  return m;
+}
+function renderSheet() {
+  let h = `<div class="hd"><div></div>${[...Array(10)].map((_, i) => `<div>${i + 1}</div>`).join('')}</div>`;
+  for (const p of players) {
+    const sc = scoreFrames(p.frames);
+    h += `<div class="row ${p.id === turn && state !== 'over' ? 'cur' : ''}"><div class="nm">${p.name}</div>`;
+    for (let f = 0; f < 10; f++) {
+      const fr = p.frames[f] || [], mk = marks(fr, f), slots = f === 9 ? 3 : 2;
+      while (mk.length < slots) mk.push(['', '']);
+      const now = p.id === turn && f === p.frames.length - 1 && state !== 'over';
+      h += `<div class="fr ${now ? 'now' : ''}"><div class="rl">${mk.map(([t, c]) => `<span class="${c}">${t}</span>`).join('')}</div><div class="tt">${sc[f] ?? ''}</div></div>`;
+    }
+    h += '</div>';
+  }
+  $('sheet').innerHTML = h;
+}
+
+/* 物理 */
+function stepBall(b, dt) {
+  const ax = b.spin * (b.y > OIL ? 1 : .12);
+  b.vx += ax * dt; b.vy = Math.max(60, b.vy - 18 * dt);
+  b.x += b.vx * dt; b.y += b.vy * dt;
+  if (!b.gutter && Math.abs(b.x) > LANE - 1) { b.gutter = true; b.x = Math.sign(b.x) * (LANE + GUT / 2); b.vx = 0; }
+}
+function simPathX(x0, ang, v, spin) {
+  const b = { x: x0, y: 0, vx: Math.sin(ang) * v, vy: Math.cos(ang) * v, spin, gutter: false };
+  for (let i = 0; i < 2000 && b.y < HEAD_Y; i++) stepBall(b, .004);
+  return b.gutter ? NaN : b.x;
+}
+function throwBall(x0, ang, v, spin) {
+  ball = { x: x0, y: 0, vx: Math.sin(ang) * v, vy: Math.cos(ang) * v, spin, gutter: false, gone: false, spd: v, rot: 0 };
+  state = 'roll'; throwT = 0; rollStart(); setTip(`球速 ${(v * .036).toFixed(1)} km/h`);
+}
+function collide(a, ra, ma, b, rb, mb) {
+  const dx = b.x - a.x, dy = b.y - a.y, d = Math.hypot(dx, dy), r = ra + rb;
+  if (d >= r || d === 0) return 0;
+  const nx = dx / d, ny = dy / d, rel = (a.vx - b.vx) * nx + (a.vy - b.vy) * ny;
+  const ov = r - d, tot = ma + mb;
+  a.x -= nx * ov * mb / tot; a.y -= ny * ov * mb / tot; b.x += nx * ov * ma / tot; b.y += ny * ov * ma / tot;
+  if (rel <= 0) return 0;
+  const j = (1 + .75) * rel / (1 / ma + 1 / mb);
+  a.vx -= j / ma * nx; a.vy -= j / ma * ny; b.vx += j / mb * nx; b.vy += j / mb * ny;
+  return rel;
+}
+function knock(p, v) {
+  if (p.st !== 'up') return;
+  if (Math.hypot(p.vx, p.vy) > 28) { p.st = 'down'; p.rot = Math.atan2(p.vy, p.vx); clack(v); }
+  else { p.vx = p.vy = 0; p.wob = .6; }
+}
+function physics(dt) {
+  if (ball && !ball.gone) {
+    stepBall(ball, dt); ball.rot += ball.vy * dt / BALL_R;
+    if (ball.y > PIT_Y) { ball.gone = true; rollStop(); }
+    if (!ball.gutter) for (const p of pins) if (p.st !== 'gone') {
+      const was = p.st;
+      const v = collide(ball, BALL_R, 7, p, p.st === 'up' ? PIN_R : PIN_DOWN_R, 1.5);
+      if (v > 0) { if (was === 'up') knock(p, v); else clack(v * .5); }
+    }
+  }
+  for (const p of pins) {
+    if (p.st !== 'down') continue;
+    const sp = Math.hypot(p.vx, p.vy);
+    if (sp > 0) { const dec = Math.min(sp, 260 * dt); p.vx -= p.vx / sp * dec; p.vy -= p.vy / sp * dec; }
+    p.x += p.vx * dt; p.y += p.vy * dt; p.rot += (p.vx > 0 ? 1 : -1) * sp * dt * .02;
+    // 球瓶區兩側擋板（反彈回來）、洗溝
+    const wall = LANE + GUT;
+    if (Math.abs(p.x) > wall) { p.x = Math.sign(p.x) * wall; p.vx *= -.55; clack(sp * .3); }
+    if (p.y > PIT_Y) p.st = 'gone';
+  }
+  for (let i = 0; i < pins.length; i++) for (let j = i + 1; j < pins.length; j++) {
+    const a = pins[i], b = pins[j];
+    if (a.st === 'gone' || b.st === 'gone' || (a.st === 'up' && b.st === 'up')) continue;
+    const au = a.st, bu = b.st;
+    const v = collide(a, a.st === 'up' ? PIN_R : PIN_DOWN_R, 1.5, b, b.st === 'up' ? PIN_R : PIN_DOWN_R, 1.5);
+    if (v > 0) { if (au === 'up') knock(a, v); if (bu === 'up') knock(b, v); if (au !== 'up' && bu !== 'up') clack(v * .4); }
+  }
+  for (const p of pins) if (p.st === 'up') { if (p.wob > 0) p.wob = Math.max(0, p.wob - dt); }
+}
+function settled() {
+  if (!ball) return false;
+  const pinsSlow = pins.every(p => p.st !== 'down' || Math.hypot(p.vx, p.vy) < 6);
+  return (ball.gone && pinsSlow) || throwT > 7;
+}
+
+/* 結算一球 */
+function afterBall() {
+  rollStop();
+  const p = P(), fr = p.frames[p.frames.length - 1], f = p.frames.length - 1;
+  const up = standing().length;
+  const down = pinsUpBefore - up;
+  fr.push(down);
+  // 判斷結果
+  let msg = '', col = '#fff', big = false;
+  const first = pinsUpBefore === 10;
+  if (first && down === 10) { p.streak++; p.strikes++; msg = p.streak >= 3 ? 'TURKEY! 🦃' : p.streak === 2 ? 'DOUBLE!' : 'STRIKE! 全倒'; col = '#f87171'; big = true; sStrike(); if (p.id === 'P') vib([40, 40, 80]); }
+  else if (!first && up === 0) { p.streak = 0; p.spares++; msg = 'SPARE! 補中'; col = '#60a5fa'; big = true; sSpare(); if (p.id === 'P') vib(40); }
+  else {
+    p.streak = 0;
+    if (ball.gutter && down === 0) { msg = '洗溝球…'; col = '#9ca3af'; sGutter(); }
+    else if (down === 0) { msg = '一支都沒倒'; col = '#9ca3af'; }
+    else { msg = `倒 ${down} 支`; col = '#fde047'; }
+    if (first && up > 0) { const sp = splitName(); if (sp) { msg += `　${sp}`; } }
+  }
+  banner = { s: msg, col, t: 1.6, big };
+  // 這一格結束了嗎？
+  let frameDone = false, reset = false;
+  if (f < 9) { frameDone = fr.length === 2 || fr[0] === 10; reset = frameDone; }
+  else {
+    const s01 = fr[0] + (fr[1] || 0);
+    if (fr.length === 3 || (fr.length === 2 && fr[0] !== 10 && s01 < 10)) frameDone = true;
+    reset = up === 0;
+  }
+  state = 'pause'; pauseT = 1.7;
+  pending = { frameDone, reset: frameDone || reset };
+  renderSheet();
+}
+let pending = null, pinsUpBefore = 10, rackFresh = true;
+function splitName() {
+  const s = standing(); if (s.length < 2 || pins[0].st === 'up') return '';
+  const nums = s.map(p => p.n).sort((a, b) => a - b).join('-');
+  // 連通性：相鄰（距離 < 35cm）
+  const seen = new Set([s[0]]), stack = [s[0]];
+  while (stack.length) { const a = stack.pop(); for (const b of s) if (!seen.has(b) && Math.hypot(PIN_POS[a.n - 1][0] - PIN_POS[b.n - 1][0], (PIN_POS[a.n - 1][1] - PIN_POS[b.n - 1][1]) * ROW) < 35) { seen.add(b); stack.push(b); } }
+  if (seen.size === s.length) return '';
+  return nums === '7-10' ? '😱 7-10 大分瓶！' : `分瓶 ${nums}`;
+}
+function nextAfterPause() {
+  const p = P();
+  if (pending.frameDone) {
+    // 換人或下一格
+    const done = pl => pl.frames.length === 10 && frameComplete(pl.frames[9], 9);
+    if (players.length === 2 && turn === 'P') turn = 'A';
+    else if (players.length === 2 && turn === 'A') turn = 'P';
+    if (players.every(done)) { endGame(); return; }
+    const np = P();
+    if (!done(np) && frameComplete(np.frames[np.frames.length - 1], np.frames.length - 1)) np.frames.push([]);
+    newRack(); pinsUpBefore = 10;
+  } else if (pending.reset) { newRack(); pinsUpBefore = 10; }
+  else {
+    // 清掉倒下的瓶
+    pins = pins.filter(q => q.st === 'up'); pins.forEach(q => { q.vx = q.vy = 0; q.wob = 0; });
+    pinsUpBefore = pins.length;
+  }
+  renderSheet(); beginTurn();
+}
+function frameComplete(fr, f) {
+  if (f < 9) return fr.length === 2 || fr[0] === 10;
+  return fr.length === 3 || (fr.length === 2 && fr[0] !== 10 && fr[0] + fr[1] < 10);
+}
+function endGame() {
+  state = 'over'; renderSheet();
+  const me = players[0], ms = scoreFrames(me.frames)[9];
+  let title;
+  if (Lv) {
+    const as = scoreFrames(players[1].frames)[9];
+    const win = ms > as;
+    title = win ? '🏆 你贏了！' : ms === as ? '🤝 平手！' : '😵 電腦贏了';
+    if (win) best['w' + mode] = (best['w' + mode] || 0) + 1;
+    $('oStats').innerHTML = `<div>你的分數<b>${ms}</b></div><div>電腦（${Lv.name}）<b>${as}</b></div><div>全倒<b>${me.strikes} 次</b></div><div>補中<b>${me.spares} 次</b></div>`;
+  } else {
+    const prev = best['-1'] || 0, nb = ms > prev;
+    if (nb) best['-1'] = ms;
+    title = ms >= 200 ? '🏆 職業水準！' : ms >= 150 ? '🎳 打得很好！' : ms >= 100 ? '👍 不錯喔' : '🙂 繼續加油';
+    $('oStats').innerHTML = `<div>總分<b>${ms}</b></div><div>最佳分數<b>${Math.max(prev, ms)}${nb ? ' 🆕' : ''}</b></div><div>全倒<b>${me.strikes} 次</b></div><div>補中<b>${me.spares} 次</b></div>`;
+  }
+  try { localStorage.setItem('bowlBest', JSON.stringify(best)); } catch (e) {} recText();
+  $('oTitle').textContent = title;
+  setTimeout(() => $('over').hidden = false, 400);
+}
+$('start').onclick = () => { initAudio(); startGame(); };
+$('again').onclick = () => { initAudio(); $('over').hidden = true; $('menu').hidden = false; state = 'menu'; };
+
+/* 電腦出球 */
+function aiThrow() {
+  const L = Lv, s = standing();
+  let target, spin = L.spin, x0, noiseX;
+  const v = L.spd[0] + Math.random() * (L.spd[1] - L.spd[0]);
+  if (s.length === 10) { target = spin < 0 ? 6.5 : 5; x0 = spin < 0 ? 20 : 4; noiseX = L.noise; }
+  else {
+    spin = 0; noiseX = L.spareNoise;
+    const front = s.reduce((a, b) => b.y < a.y ? b : a), cx = s.reduce((a, b) => a + b.x, 0) / s.length;
+    target = front.x * .6 + cx * .4; x0 = -target * .4;
+  }
+  target += (Math.random() + Math.random() + Math.random() - 1.5) * 2 * noiseX;
+  let lo = -.06, hi = .06;
+  for (let i = 0; i < 22; i++) { const mid = (lo + hi) / 2, px = simPathX(x0, mid, v, spin); const xx = isNaN(px) ? (mid > 0 ? 999 : -999) : px; if (xx < target) lo = mid; else hi = mid; }
+  aimX = x0; throwBall(x0, (lo + hi) / 2, v, spin);
+}
+
+/* 玩家操作 */
+const toLocal = e => { const r = cv.getBoundingClientRect(); return { x: (e.clientX - r.left) / r.width * W, y: (e.clientY - r.top) / r.height * H }; };
+let drag = null;
+cv.addEventListener('pointerdown', e => {
+  initAudio(); if (state !== 'aim') return;
+  try { cv.setPointerCapture(e.pointerId); } catch (er) {}
+  const q = toLocal(e); drag = { id: e.pointerId, sx: q.x, sy: q.y, ax: aimX, pts: [{ x: q.x, y: q.y, t: performance.now() }], throwing: false };
+});
+cv.addEventListener('pointermove', e => {
+  if (!drag || e.pointerId !== drag.id) return;
+  const q = toLocal(e); drag.pts.push({ x: q.x, y: q.y, t: performance.now() });
+  if (!drag.throwing) {
+    if (drag.sy - q.y > 28) { drag.throwing = true; drag.pts = drag.pts.slice(-2); }
+    else aimX = Math.max(-LANE + BALL_R + 2, Math.min(LANE - BALL_R - 2, drag.ax + (q.x - drag.sx) / K));
+  }
+});
+const up = e => {
+  if (!drag || e.pointerId !== drag.id) return;
+  const d = drag; drag = null;
+  if (state !== 'aim' || !d.throwing) return;
+  const pts = d.pts, a = pts[0], b = pts[pts.length - 1], dy = a.y - b.y, dx = b.x - a.x;
+  if (dy < 50) { setTip('滑長一點才丟得出去喔'); return; }
+  const now = b.t, rec = pts.filter(p => now - p.t < 130), r0 = rec[0] || a, dtS = Math.max(.03, (now - r0.t) / 1000);
+  const vPx = Math.max(0, (r0.y - b.y) / dtS);
+  const v = Math.max(420, Math.min(1080, 320 + vPx * .26));
+  const ang = Math.max(-.055, Math.min(.055, dx / dy * .11));
+  // 弧度：路徑中點偏離直線多少
+  let mid = pts[Math.floor(pts.length / 2)], len = Math.hypot(dx, dy), cm = { x: (a.x + b.x) / 2, y: (a.y + b.y) / 2 };
+  let best = 0; for (const p of pts) { const t = ((p.x - a.x) * dx + (a.y - p.y) * dy) / (len * len); if (Math.abs(t - .5) < Math.abs(best - .5) || best === 0) { best = t; mid = p; } }
+  const chordX = a.x + dx * best, lateral = chordX - mid.x;
+  const spin = Math.max(-110, Math.min(110, lateral / len * 600));
+  throwBall(aimX, ang, v, Math.abs(spin) < 12 ? 0 : spin);
+  if (Math.abs(spin) >= 30) fx.push({ s: spin > 0 ? '↪ 右曲球' : '↩ 左曲球', x: 200, y: 520, t: 1, col: '#c4b5fd' });
+};
+cv.addEventListener('pointerup', up); cv.addEventListener('pointercancel', up);
+
+/* 更新 */
+function update(dt) {
+  time += dt; fx.forEach(f => f.t -= dt); fx = fx.filter(f => f.t > 0); if (banner) { banner.t -= dt; if (banner.t <= 0) banner = null; }
+  if (state === 'ai') { aiT -= dt; if (aiT <= 0) aiThrow(); }
+  if (state === 'roll') {
+    throwT += dt; const n = 10; for (let i = 0; i < n; i++) physics(dt / n);
+    if (ball && !ball.gone) camY += (Math.max(0, Math.min(1480, ball.y - 260)) - camY) * Math.min(1, dt * 6);
+    if (ball && ball.gone) camY += (1480 - camY) * Math.min(1, dt * 4);
+    if (settled()) afterBall();
+  } else if (state === 'pause') {
+    for (let i = 0; i < 4; i++) physics(dt / 4);
+    pauseT -= dt; if (pauseT <= 0) nextAfterPause();
+  } else if (state === 'aim') camY += (0 - camY) * Math.min(1, dt * 5);
+}
+
+/* 繪圖 */
+function prj(x, y) { const d = Math.max(30, y - camY + D0), p = D0 / d; return { x: 200 + x * K * p, y: HZ + (BOT - HZ) * p, p }; }
+function poly(pts, fill) { ctx.fillStyle = fill; ctx.beginPath(); pts.forEach((q, i) => i ? ctx.lineTo(q.x, q.y) : ctx.moveTo(q.x, q.y)); ctx.closePath(); ctx.fill(); }
+function drawLane() {
+  const y0 = camY - 160, y1 = PIT_Y;
+  // 背景：遠處牆
+  const bg = ctx.createLinearGradient(0, 0, 0, H); bg.addColorStop(0, '#0f172a'); bg.addColorStop(1, '#1e1b4b');
+  ctx.fillStyle = bg; ctx.fillRect(0, 0, W, H);
+  const far = prj(0, y1);
+  const wall = ctx.createLinearGradient(0, 0, 0, far.y); wall.addColorStop(0, '#0b1023'); wall.addColorStop(1, '#2e1065');
+  ctx.fillStyle = wall; ctx.fillRect(0, 0, W, far.y + 2);
+  for (let i = 0; i < 14; i++) { const lx = (i + .5) * W / 14; ctx.fillStyle = `hsla(${(i * 40 + time * 60) % 360},90%,65%,.75)`; ctx.beginPath(); ctx.arc(lx, far.y - 230 * far.p, 3.2, 0, 7); ctx.fill(); }
+  ctx.fillStyle = '#22d3ee'; ctx.fillRect(0, far.y - 6, W, 3); ctx.fillStyle = '#f472b6'; ctx.fillRect(0, far.y - 12, W, 2);
+  ctx.fillStyle = 'rgba(255,255,255,.06)'; for (let i = 0; i < 6; i++) ctx.fillRect(i * 70 + 10, 0, 34, far.y - 20);
+  // 霓虹裝飾
+  ctx.fillStyle = '#f472b6'; ctx.font = `900 ${Math.round(70 * far.p)}px system-ui`; ctx.textAlign = 'center'; ctx.globalAlpha = .9; ctx.fillText('★ BOWL ★', 200, far.y - 40 * far.p * 3); ctx.globalAlpha = 1;
+  // 兩側擋板
+  poly([prj(-LANE - GUT - 30, y0), prj(-LANE - GUT - 30, y1), prj(-LANE - GUT, y1), prj(-LANE - GUT, y0)], '#3f2a1a');
+  poly([prj(LANE + GUT, y0), prj(LANE + GUT, y1), prj(LANE + GUT + 30, y1), prj(LANE + GUT + 30, y0)], '#3f2a1a');
+  // 洗溝
+  poly([prj(-LANE - GUT, y0), prj(-LANE - GUT, y1), prj(-LANE, y1), prj(-LANE, y0)], '#4b5563');
+  poly([prj(LANE, y0), prj(LANE, y1), prj(LANE + GUT, y1), prj(LANE + GUT, y0)], '#4b5563');
+  // 球道木板
+  const a = prj(-LANE, y0), b = prj(LANE, y0), c = prj(LANE, y1), d = prj(-LANE, y1);
+  const g = ctx.createLinearGradient(0, d.y, 0, a.y); g.addColorStop(0, '#f5d29b'); g.addColorStop(1, '#d9a35f');
+  poly([a, b, c, d], g);
+  ctx.strokeStyle = 'rgba(150,95,40,.25)'; ctx.lineWidth = 1;
+  for (let i = 1; i < 39; i++) { const x = -LANE + i * (LANE * 2 / 39); const p1 = prj(x, y0), p2 = prj(x, y1); ctx.beginPath(); ctx.moveTo(p1.x, p1.y); ctx.lineTo(p2.x, p2.y); ctx.stroke(); }
+  // 犯規線
+  if (camY < 120) { const f1 = prj(-LANE, 0), f2 = prj(LANE, 0); ctx.strokeStyle = '#111'; ctx.lineWidth = 3; ctx.beginPath(); ctx.moveTo(f1.x, f1.y); ctx.lineTo(f2.x, f2.y); ctx.stroke(); }
+  // 瞄準箭頭與圓點
+  for (let i = 1; i <= 7; i++) {
+    const x = -LANE + i * 5 * (LANE * 2 / 39) - 1.4;
+    const tip = prj(x, 470), l = prj(x - 2.5, 440), r = prj(x + 2.5, 440);
+    if (tip.y < BOT + 80) poly([tip, r, l], '#7c2d12');
+    const dt = prj(x, 210); if (camY < 200) { ctx.fillStyle = '#7c2d12'; ctx.beginPath(); ctx.arc(dt.x, dt.y, 2.2 * dt.p + .5, 0, 7); ctx.fill(); }
+  }
+  // 球瓶區
+  const pd = [prj(-LANE, HEAD_Y - 30), prj(LANE, HEAD_Y - 30), prj(LANE, y1), prj(-LANE, y1)];
+  poly(pd, 'rgba(255,255,255,.18)');
+  // 球瓶坑
+  const pit = [prj(-LANE - GUT - 30, y1), prj(LANE + GUT + 30, y1), prj(LANE + GUT + 30, y1 + 300), prj(-LANE - GUT - 30, y1 + 300)];
+  poly(pit, '#030712');
+}
+function drawPin(p) {
+  const q = prj(p.x, p.y), s = q.p * K;
+  if (p.st === 'up') {
+    const h = 38 * s, w = 6.2 * s, wob = p.wob > 0 ? Math.sin(p.wob * 40) * .12 * p.wob : 0;
+    ctx.fillStyle = 'rgba(0,0,0,.25)'; ctx.beginPath(); ctx.ellipse(q.x + w * .4, q.y, w * 1.3, w * .45, 0, 0, 7); ctx.fill();
+    ctx.save(); ctx.translate(q.x, q.y); ctx.rotate(wob);
+    ctx.fillStyle = '#fafafa'; ctx.strokeStyle = 'rgba(0,0,0,.25)'; ctx.lineWidth = Math.max(.6, s * .4);
+    ctx.beginPath(); ctx.moveTo(-w * .55, 0);
+    ctx.bezierCurveTo(-w * 1.15, -h * .3, -w * 1.1, -h * .45, -w * .42, -h * .66);
+    ctx.bezierCurveTo(-w * .3, -h * .74, -w * .78, -h * .92, -w * .38, -h * .99);
+    ctx.quadraticCurveTo(0, -h * 1.05, w * .38, -h * .99);
+    ctx.bezierCurveTo(w * .78, -h * .92, w * .3, -h * .74, w * .42, -h * .66);
+    ctx.bezierCurveTo(w * 1.1, -h * .45, w * 1.15, -h * .3, w * .55, 0);
+    ctx.closePath(); ctx.fill(); ctx.stroke();
+    ctx.fillStyle = '#dc2626'; ctx.fillRect(-w * .5, -h * .76, w, h * .035); ctx.fillRect(-w * .5, -h * .7, w, h * .035);
+    ctx.fillStyle = 'rgba(255,255,255,.7)'; ctx.beginPath(); ctx.ellipse(-w * .35, -h * .35, w * .15, h * .14, 0, 0, 7); ctx.fill();
+    ctx.restore();
+  } else if (p.st === 'down') {
+    const L = 19 * s, w = 5 * s, ang = p.rot;
+    ctx.save(); ctx.translate(q.x, q.y - w * .6); ctx.scale(1, .55); ctx.rotate(ang);
+    ctx.fillStyle = 'rgba(0,0,0,.25)'; ctx.beginPath(); ctx.ellipse(2, 4, L, w * 1.2, 0, 0, 7); ctx.fill();
+    ctx.fillStyle = '#f3f4f6'; ctx.beginPath(); ctx.ellipse(0, 0, L, w * 1.1, 0, 0, 7); ctx.fill();
+    ctx.fillStyle = '#dc2626'; ctx.fillRect(L * .35, -w, L * .08, w * 2); ctx.fillRect(L * .5, -w * .9, L * .08, w * 1.8);
+    ctx.restore();
+  }
+}
+function drawBall(bx, by, rot, alpha = 1) {
+  const q = prj(bx, by), r = BALL_R * K * q.p;
+  ctx.globalAlpha = alpha;
+  ctx.fillStyle = 'rgba(0,0,0,.3)'; ctx.beginPath(); ctx.ellipse(q.x, q.y, r * 1.05, r * .35, 0, 0, 7); ctx.fill();
+  const cy = q.y - r;
+  const g = ctx.createRadialGradient(q.x - r * .35, cy - r * .35, r * .1, q.x, cy, r); g.addColorStop(0, '#93c5fd'); g.addColorStop(.5, '#1d4ed8'); g.addColorStop(1, '#172554');
+  ctx.fillStyle = g; ctx.beginPath(); ctx.arc(q.x, cy, r, 0, 7); ctx.fill();
+  // 指洞（隨滾動上下移動）
+  const ph = (rot % (Math.PI * 2)), vis = Math.cos(ph);
+  if (vis > -.2) { ctx.fillStyle = '#0b1020'; const oy = cy - Math.sin(ph) * r * .45; for (const [ox, rr] of [[-.22, .12], [.12, .12], [-.04, .15]]) { ctx.beginPath(); ctx.ellipse(q.x + ox * r, oy + (rr === .15 ? r * .3 : 0), rr * r, rr * r * Math.max(.2, vis), 0, 0, 7); ctx.fill(); } }
+  ctx.globalAlpha = 1;
+}
+function drawMini() {
+  const ox = 352, oy = 14, sc = .55;
+  ctx.fillStyle = 'rgba(0,0,0,.45)'; ctx.beginPath(); ctx.roundRect(ox - 34, oy - 8, 68, 56, 8); ctx.fill();
+  const byN = {}; pins.forEach(p => byN[p.n] = p);
+  PIN_POS.forEach(([x, r], i) => {
+    const p = byN[i + 1], upp = p && p.st === 'up';
+    ctx.fillStyle = upp ? '#fff' : 'rgba(255,255,255,.18)';
+    ctx.beginPath(); ctx.arc(ox + x * sc, oy + 40 - r * 12, 4.2, 0, 7); ctx.fill();
+  });
+}
+function draw() {
+  ctx.setTransform(scale, 0, 0, scale, 0, 0);
+  drawLane();
+  const objs = pins.filter(p => p.st !== 'gone').map(p => ({ y: p.y, f: () => drawPin(p) }));
+  if (ball && !ball.gone) objs.push({ y: ball.y - (ball.gutter ? 0 : 0), f: () => drawBall(ball.x, ball.y, ball.rot) });
+  if (state === 'aim' || state === 'ai') objs.push({ y: 0, f: () => drawBall(aimX, 0, 0) });
+  objs.sort((a, b) => b.y - a.y).forEach(o => o.f());
+  if (state !== 'menu') drawMini();
+  // 瞄準輔助
+  if (state === 'aim') {
+    const q = prj(aimX, 0);
+    ctx.strokeStyle = 'rgba(253,224,71,.5)'; ctx.setLineDash([6, 8]); ctx.lineWidth = 2; ctx.beginPath(); ctx.moveTo(q.x, q.y - 30); const t = prj(aimX, 900); ctx.lineTo(t.x, t.y); ctx.stroke(); ctx.setLineDash([]);
+    ctx.fillStyle = '#fde047'; ctx.font = '700 12px system-ui'; ctx.textAlign = 'center';
+    ctx.fillText('↔ 拖曳選位置　↑ 往上滑出球', 200, 632);
+    if (drag && drag.throwing && drag.pts.length > 1) { ctx.strokeStyle = 'rgba(255,255,255,.6)'; ctx.lineWidth = 4; ctx.lineCap = 'round'; ctx.beginPath(); drag.pts.forEach((p, i) => i ? ctx.lineTo(p.x, p.y) : ctx.moveTo(p.x, p.y)); ctx.stroke(); }
+  }
+  if (players.length === 2 && state !== 'menu' && state !== 'over') { ctx.fillStyle = turn === 'P' ? '#fca5a5' : '#93c5fd'; ctx.font = '900 14px system-ui'; ctx.textAlign = 'left'; ctx.fillText(turn === 'P' ? '▶ 你的回合' : '▶ 電腦回合', 10, 22); }
+  for (const f of fx) { ctx.globalAlpha = Math.min(1, f.t * 2); ctx.font = '900 16px system-ui'; ctx.textAlign = 'center'; ctx.lineWidth = 4; ctx.strokeStyle = '#000'; ctx.strokeText(f.s, f.x, f.y); ctx.fillStyle = f.col; ctx.fillText(f.s, f.x, f.y); ctx.globalAlpha = 1; }
+  if (banner) {
+    const k = Math.min(1, (1.6 - banner.t) * 6), a = Math.min(1, banner.t * 3);
+    ctx.globalAlpha = a; ctx.save(); ctx.translate(200, 330); ctx.scale(.6 + .4 * k, .6 + .4 * k);
+    ctx.font = banner.big ? '900 40px system-ui' : '900 26px system-ui'; ctx.textAlign = 'center';
+    ctx.lineWidth = 7; ctx.strokeStyle = '#000'; ctx.strokeText(banner.s, 0, 0); ctx.fillStyle = banner.col; ctx.fillText(banner.s, 0, 0);
+    ctx.restore(); ctx.globalAlpha = 1;
+  }
+}
+
+let last = performance.now();
+function loop(now) { const dt = Math.min(.033, (now - last) / 1000); last = now; update(dt); draw(); requestAnimationFrame(loop); }
+resize(); renderSheet(); requestAnimationFrame(loop);
+window.__bw = { get state() { return state; }, get players() { return players; }, get pins() { return pins; }, get ball() { return ball; }, get turn() { return turn; }, get aimX() { return aimX; }, set aimX(v) { aimX = v; }, throwBall, simPathX, scoreFrames, standing };
+})();
+</script>
+</body>
+</html>
