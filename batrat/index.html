@@ -1,0 +1,319 @@
+<!DOCTYPE html>
+<html lang="zh-Hant">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1,maximum-scale=1,user-scalable=no">
+<title>球棒打老鼠</title>
+<style>
+  html,body{margin:0;height:100%;background:#1c1410;color:#fff;font-family:system-ui,-apple-system,"PingFang TC","Noto Sans TC",sans-serif;overflow:hidden;touch-action:none;user-select:none;-webkit-user-select:none}
+  #app{max-width:520px;margin:0 auto;height:100%;display:flex;flex-direction:column}
+  #hud{display:flex;justify-content:space-between;align-items:center;padding:8px 12px 2px;font-size:11px;color:#fde4b8}
+  #hud b{display:block;font-size:19px;color:#fff;font-variant-numeric:tabular-nums}
+  #tip{text-align:center;font-size:13px;height:18px;color:#fde047}
+  #wrap{position:relative;flex:1;min-height:0;display:flex;justify-content:center;align-items:center;padding-bottom:10px}
+  canvas{display:block;touch-action:none;border-radius:12px}
+  .ov{position:absolute;inset:0;display:flex;align-items:center;justify-content:center;z-index:5}
+  .box{background:#2b1d14f5;border:2px solid #f59e0b;border-radius:16px;padding:18px;width:min(320px,88%);text-align:center}
+  .box h2{margin:0 0 6px;font-size:27px;color:#fbbf24}
+  .box p{font-size:12.5px;line-height:1.75;margin:6px 0 12px;text-align:left}
+  .go{width:100%;background:#d97706;color:#fff;border:0;border-radius:12px;padding:13px;font-size:17px;font-weight:800}
+  .stats{display:grid;grid-template-columns:1fr 1fr;gap:6px;margin:8px 0 14px}
+  .stats div{background:#0006;border-radius:10px;padding:7px;font-size:11px}
+  .stats b{display:block;font-size:19px;color:#fbbf24}
+  #rec{font-size:11px;color:#fed7aa;margin-bottom:10px}
+  [hidden]{display:none!important}
+</style>
+</head>
+<body>
+<div id="app">
+  <div id="hud">
+    <div>分數<b id="hScore">0</b></div>
+    <div>連擊<b id="hCombo">0</b></div>
+    <div>等級<b id="hLv">1</b></div>
+    <div style="text-align:right">生命<b id="hLife">❤️❤️❤️</b></div>
+  </div>
+  <div id="tip"></div>
+  <div id="wrap">
+    <canvas id="c"></canvas>
+    <div class="ov" id="menu"><div class="box">
+      <h2>🏏 球棒打老鼠</h2>
+      <p>老鼠從牆洞衝過來，到你面前會<b>跳起來撲你</b>！<br>
+      👆 <b>點一下或在老鼠身上滑一下</b>就揮棒。<br>
+      ⚾ 趁牠<b>跳在半空中</b>打中 = <b>全壘打</b>，分數最高！還在地上打 = 安打。<br>
+      太早揮會揮空，要等一下才能再揮。<br>
+      🐀 胖老鼠要打兩下　🌀 有的會假裝停下來<br>
+      💣 <b>炸彈鼠不要打</b>，讓牠跑過去！　👑 金老鼠大加分</p>
+      <div id="rec"></div>
+      <button class="go" id="start">開始打擊</button>
+    </div></div>
+    <div class="ov" id="over" hidden><div class="box">
+      <h2 id="oTitle">遊戲結束</h2>
+      <div class="stats" id="oStats"></div>
+      <button class="go" id="again">再打一場</button>
+    </div></div>
+  </div>
+</div>
+<script>
+(() => {
+const $ = id => document.getElementById(id);
+const W = 400, H = 640, HZ = 200, FLOOR_FAR = 300, BOT = 640, ZONE = .26, JUMP_Z = .14, JUMP_DUR = .62;
+const HOLES = [-1.45, -.5, .5, 1.45];
+const TYPES = {
+  norm: { hp: 1, spd: 1, col: '#9ca3af', dark: '#6b7280', size: 1, pts: 100 },
+  fast: { hp: 1, spd: 1.6, col: '#a16207', dark: '#713f12', size: .9, pts: 150 },
+  fat: { hp: 2, spd: .75, col: '#57534e', dark: '#292524', size: 1.35, pts: 250 },
+  feint: { hp: 1, spd: 1.1, col: '#a78bfa', dark: '#6d28d9', size: 1, pts: 200 },
+  bomb: { hp: 1, spd: 1.05, col: '#1f2937', dark: '#030712', size: 1, pts: 0 },
+  gold: { hp: 1, spd: 1.45, col: '#facc15', dark: '#a16207', size: .95, pts: 500 },
+};
+const cv = $('c'), ctx = cv.getContext('2d');
+let scale = 1;
+function resize() {
+  const wr = $('wrap').getBoundingClientRect();
+  const s = Math.min((wr.width - 6) / W, (wr.height - 6) / H), d = window.devicePixelRatio || 1;
+  cv.style.width = W * s + 'px'; cv.style.height = H * s + 'px';
+  cv.width = Math.round(W * s * d); cv.height = Math.round(H * s * d); scale = s * d;
+}
+addEventListener('resize', resize);
+
+/* 音效 */
+let ac = null;
+function initAudio() { if (!ac) { try { ac = new (window.AudioContext || window.webkitAudioContext)(); } catch (e) {} } else if (ac.state === 'suspended') ac.resume(); }
+function tone(f, d, type = 'sine', v = .07, f2, delay = 0) { if (!ac) return; const t = ac.currentTime + delay, o = ac.createOscillator(), g = ac.createGain(); o.type = type; o.frequency.setValueAtTime(f, t); if (f2) o.frequency.exponentialRampToValueAtTime(f2, t + d); g.gain.setValueAtTime(v, t); g.gain.exponentialRampToValueAtTime(.0001, t + d); o.connect(g).connect(ac.destination); o.start(t); o.stop(t + d + .02); }
+function noise(d, v, lp, hp = 0) { if (!ac) return; const n = ac.sampleRate * d, b = ac.createBuffer(1, n, ac.sampleRate), x = b.getChannelData(0); for (let i = 0; i < n; i++) x[i] = (Math.random() * 2 - 1) * Math.pow(1 - i / n, 2); const s = ac.createBufferSource(), f = ac.createBiquadFilter(), g = ac.createGain(); s.buffer = b; f.type = 'lowpass'; f.frequency.value = lp; g.gain.value = v; let nd = s.connect(f); if (hp) { const h = ac.createBiquadFilter(); h.type = 'highpass'; h.frequency.value = hp; nd = nd.connect(h); } nd.connect(g).connect(ac.destination); s.start(); }
+const sSwing = () => noise(.18, .25, 2200, 500);
+const sClang = big => { tone(big ? 1900 : 1300, big ? .4 : .2, 'triangle', .12); tone(big ? 2600 : 1800, .15, 'sine', .06); noise(.06, .3, 6000, 2000); };
+const sSqueak = () => tone(1800 + Math.random() * 600, .12, 'sine', .05, 2600);
+const sBite = () => { noise(.25, .4, 800); tone(150, .3, 'sawtooth', .07, 80); };
+const sBoom = () => { noise(.6, .6, 700); tone(80, .5, 'sine', .15, 40); };
+const sCheer = () => noise(1, .18, 2500, 400);
+const vib = ms => { try { navigator.vibrate && navigator.vibrate(ms); } catch (e) {} };
+
+/* 狀態 */
+let best = 0; try { best = +localStorage.getItem('batBest') || 0; } catch (e) {}
+const recText = () => $('rec').textContent = best ? `最高分 ${best}` : '';
+recText();
+let state = 'menu', time = 0, t = 0, score = 0, combo = 0, maxCombo = 0, lives = 3, level = 1, hr = 0, hits = 0, spawnT = 0;
+let rats = [], flying = [], fx = [], parts = [], swing = null, cool = 0, shake = 0, flash = 0;
+function setTip(s) { $('tip').textContent = s; }
+function hud() { $('hScore').textContent = score; $('hCombo').textContent = combo; $('hLv').textContent = level; $('hLife').textContent = '❤️'.repeat(Math.max(0, lives)) + '🤍'.repeat(Math.max(0, 3 - lives)); }
+
+/* 透視投影：z=1 牆邊，z=0 腳前 */
+function proj(lx, z) { const s = 1 / (1 + 3.2 * Math.max(-.2, z)); const k = (s - 1 / 4.2) / (1 - 1 / 4.2); return { x: 200 + lx * 185 * (.5 + .5 * k), y: FLOOR_FAR + (BOT - 60 - FLOOR_FAR) * k, s: .42 + .58 * k }; }
+
+function spawn() {
+  const r = Math.random(), lv = level;
+  let type = 'norm';
+  if (lv >= 2 && r < .18) type = 'fast';
+  else if (lv >= 2 && r < .3) type = 'fat';
+  else if (lv >= 3 && r < .42) type = 'feint';
+  else if (lv >= 2 && r < .52) type = 'bomb';
+  else if (r < .57) type = 'gold';
+  const T = TYPES[type], hole = HOLES[(Math.random() * 4) | 0];
+  rats.push({ type, ...T, lx: hole, tx: (Math.random() - .5) * 1.1, z: 1, v: (.3 + lv * .035) * T.spd, jump: 0, stun: 0, wait: type === 'feint' ? .6 + Math.random() * .6 : 0, feinted: false, bob: Math.random() * 6, dead: false });
+  sSqueak();
+}
+function startGame() {
+  score = combo = maxCombo = hr = hits = 0; lives = 3; level = 1; t = 0; spawnT = .8; rats = []; flying = []; fx = []; parts = []; swing = null; cool = 0;
+  state = 'play'; $('menu').hidden = true; $('over').hidden = true; setTip('等老鼠跳起來再揮！'); hud();
+}
+$('start').onclick = () => { initAudio(); startGame(); };
+$('again').onclick = () => { initAudio(); startGame(); };
+
+/* 揮棒 */
+const toLocal = e => { const r = cv.getBoundingClientRect(); return { x: (e.clientX - r.left) / r.width * W, y: (e.clientY - r.top) / r.height * H }; };
+let ptr = null;
+cv.addEventListener('pointerdown', e => { initAudio(); if (state !== 'play') return; const q = toLocal(e); ptr = { id: e.pointerId, ...q, t: performance.now() }; doSwing(q); });
+cv.addEventListener('pointermove', e => {
+  if (!ptr || e.pointerId !== ptr.id || !swing) return;
+  const q = toLocal(e), dx = q.x - ptr.x;
+  if (Math.abs(dx) > 25 && performance.now() - ptr.t < 200) { const dir = Math.sign(dx); swing.dir = dir; for (const f of flying) if (f.fresh) f.vx = Math.abs(f.vx) * dir; }
+});
+cv.addEventListener('pointerup', () => ptr = null); cv.addEventListener('pointercancel', () => ptr = null);
+function ratScreen(r) { const p = proj(r.lx, r.z), h = r.jump > 0 ? Math.sin(Math.min(1, r.jump / JUMP_DUR) * Math.PI) * 150 * p.s : 0; return { x: p.x, y: p.y - h - 22 * p.s * r.size, s: p.s, h }; }
+function doSwing(q) {
+  if (cool > 0) return;
+  const dir = q.x < 200 ? -1 : 1;
+  swing = { t: 0, dir, x: q.x, y: q.y }; sSwing();
+  // 找打擊區裡、離手指最近的老鼠
+  let target = null, bd = 1e9;
+  for (const r of rats) {
+    if (r.dead || r.z > ZONE) continue;
+    const s = ratScreen(r), d = Math.hypot(s.x - q.x, s.y - q.y);
+    if (d < 70 + 60 * s.s * r.size && d < bd) { bd = d; target = r; }
+  }
+  if (!target) { cool = .45; combo = 0; hud(); fx.push({ s: '揮空！', x: q.x, y: q.y - 30, t: .7, col: '#d6d3d1' }); return; }
+  cool = .2;
+  hitRat(target, dir);
+}
+function hitRat(r, dir) {
+  const s = ratScreen(r);
+  if (r.type === 'bomb') {
+    r.dead = true; sBoom(); vib([100, 50, 150]); shake = .5; flash = .4; lives--; combo = 0;
+    for (let i = 0; i < 30; i++) { const a = Math.random() * 7, v = 100 + Math.random() * 300; parts.push({ x: s.x, y: s.y, vx: Math.cos(a) * v, vy: Math.sin(a) * v, t: .8, col: i % 2 ? '#f97316' : '#facc15', sz: 5 }); }
+    fx.push({ s: '💥 炸彈鼠不能打！', x: 200, y: 300, t: 1.4, col: '#f87171', big: 1 }); hud(); checkOver(); return;
+  }
+  const air = r.jump > 0 && r.jump < JUMP_DUR * .92;
+  r.hp--;
+  if (r.hp > 0) { r.z = Math.min(.6, r.z + .28); r.jump = 0; r.stun = .7; sClang(false); fx.push({ s: '再一下！', x: s.x, y: s.y - 30, t: .8, col: '#fde047' }); return; }
+  r.dead = true; hits++; combo++; maxCombo = Math.max(maxCombo, combo);
+  const mult = 1 + Math.min(combo - 1, 20) * .1;
+  const base = r.pts * (air ? 2 : 1), pts = Math.round(base * mult);
+  score += pts; sClang(air); vib(air ? 40 : 20);
+  if (air) { hr++; sCheer(); fx.push({ s: r.type === 'gold' ? '👑 黃金全壘打！' : '全壘打！⚾', x: s.x, y: s.y - 40, t: 1.1, col: '#fde047', big: 1 }); }
+  else fx.push({ s: '安打！', x: s.x, y: s.y - 30, t: .8, col: '#fff' });
+  fx.push({ s: `+${pts}`, x: s.x + dir * 30, y: s.y - 10, t: .8, col: '#86efac' });
+  if (combo >= 5 && combo % 5 === 0) fx.push({ s: `${combo} 連擊！`, x: 200, y: 260, t: 1, col: '#fb923c', big: 1 });
+  flying.push({ x: s.x, y: s.y, vx: dir * (air ? 520 + Math.random() * 200 : 420), vy: air ? -760 : -260, rot: 0, vr: dir * (air ? 18 : 10), s: s.s * r.size, type: r.type, air, t: air ? 1.6 : 1.1, fresh: true });
+  setTimeout(() => flying.forEach(f => f.fresh = false), 160);
+  for (let i = 0; i < 10; i++) parts.push({ x: s.x, y: s.y, vx: (Math.random() - .5) * 300, vy: -Math.random() * 300, t: .4, col: '#fff7ed', sz: 3 });
+  hud();
+}
+function checkOver() { if (lives <= 0) { state = 'over'; setTimeout(endGame, 700); } }
+function endGame() {
+  const nb = score > best; if (nb) { best = score; try { localStorage.setItem('batBest', best); } catch (e) {} } recText();
+  $('oTitle').textContent = nb ? '🏆 新紀錄！' : '遊戲結束';
+  $('oStats').innerHTML = `<div>分數<b>${score}${nb ? ' 🆕' : ''}</b></div><div>到達等級<b>${level}</b></div><div>全壘打<b>${hr} 支</b></div><div>最高連擊<b>${maxCombo}</b></div>`;
+  $('over').hidden = false;
+}
+
+/* 更新 */
+function update(dt) {
+  time += dt;
+  fx.forEach(f => f.t -= dt); fx = fx.filter(f => f.t > 0);
+  parts.forEach(p => { p.t -= dt; p.x += p.vx * dt; p.y += p.vy * dt; p.vy += 600 * dt; }); parts = parts.filter(p => p.t > 0);
+  flying.forEach(f => { f.t -= dt; f.x += f.vx * dt; f.y += f.vy * dt; f.vy += (f.air ? 700 : 900) * dt; f.rot += f.vr * dt; if (f.air) f.s *= Math.pow(.55, dt); }); flying = flying.filter(f => f.t > 0);
+  shake = Math.max(0, shake - dt); flash = Math.max(0, flash - dt);
+  if (swing) { swing.t += dt; if (swing.t > .25) swing = null; }
+  if (state !== 'play') return;
+  t += dt; cool = Math.max(0, cool - dt);
+  const nl = 1 + Math.floor(t / 30); if (nl !== level) { level = nl; fx.push({ s: `等級 ${level}！老鼠變多了`, x: 200, y: 250, t: 1.6, col: '#fb923c', big: 1 }); hud(); }
+  spawnT -= dt;
+  if (spawnT <= 0) { spawn(); if (level >= 3 && Math.random() < .2 + level * .03) spawn(); spawnT = Math.max(.55, 1.9 - level * .17) * (.7 + Math.random() * .6); }
+  for (const r of rats) {
+    if (r.dead) continue;
+    r.bob += dt * 18 * r.spd;
+    if (r.stun > 0) { r.stun -= dt; continue; }
+    if (r.jump > 0) {
+      r.jump += dt; r.z = Math.max(-.02, r.z - dt * .12);
+      if (r.jump >= JUMP_DUR) { r.dead = true; bitten(r); }
+      continue;
+    }
+    if (r.type === 'feint' && !r.feinted && r.z < .5) { r.feinted = true; r.pause = r.wait; fx.push({ s: '？', x: ratScreen(r).x, y: ratScreen(r).y - 30, t: .6, col: '#c4b5fd' }); }
+    if (r.pause > 0) { r.pause -= dt; if (r.pause <= 0) r.v *= 1.9; continue; }
+    r.z -= r.v * dt; r.lx += (r.tx - r.lx) * Math.min(1, dt * 1.5);
+    if (r.z <= JUMP_Z) {
+      if (r.type === 'bomb') { r.z -= r.v * dt * 2; if (r.z < -.25) { r.dead = true; score += 50; fx.push({ s: '閃得好 +50', x: ratScreen(r).x, y: 470, t: .8, col: '#86efac' }); hud(); } }
+      else { r.jump = .001; sSqueak(); }
+    }
+  }
+  rats = rats.filter(r => !r.dead);
+}
+function bitten(r) {
+  lives--; combo = 0; sBite(); vib([120, 60, 120]); shake = .45; flash = .3;
+  fx.push({ s: '被撲到了！', x: 200, y: 360, t: 1.2, col: '#f87171', big: 1 }); hud(); checkOver();
+}
+
+/* 繪圖 */
+function drawRoom() {
+  // 牆
+  const wall = ctx.createLinearGradient(0, 0, 0, FLOOR_FAR); wall.addColorStop(0, '#d6c3a5'); wall.addColorStop(1, '#bfa47e');
+  ctx.fillStyle = wall; ctx.fillRect(0, 0, W, FLOOR_FAR);
+  ctx.fillStyle = 'rgba(120,90,60,.12)'; for (let x = 0; x < W; x += 34) ctx.fillRect(x, 0, 2, FLOOR_FAR);
+  // 架子與箱子
+  ctx.fillStyle = '#8b5a2b'; ctx.fillRect(20, 120, 120, 10); ctx.fillRect(260, 90, 120, 10);
+  ctx.fillStyle = '#a16207'; ctx.fillRect(34, 86, 34, 34); ctx.fillRect(74, 96, 26, 24); ctx.fillRect(280, 56, 40, 34);
+  ctx.fillStyle = '#fef3c7'; ctx.fillRect(330, 62, 26, 28); ctx.font = '22px system-ui'; ctx.textAlign = 'center'; ctx.fillStyle = '#000'; ctx.fillText('🧀', 110, 115); ctx.fillText('🥫', 366, 86);
+  // 踢腳板
+  ctx.fillStyle = '#6b4423'; ctx.fillRect(0, FLOOR_FAR - 16, W, 16);
+  // 牆洞
+  for (const hx of HOLES) { const p = proj(hx, 1); ctx.fillStyle = '#1c1410'; ctx.beginPath(); ctx.ellipse(p.x, FLOOR_FAR, 26, 30, 0, Math.PI, 0); ctx.fill(); ctx.strokeStyle = '#4a2f1a'; ctx.lineWidth = 3; ctx.stroke(); }
+  // 地板（木板透視）
+  const fl = ctx.createLinearGradient(0, FLOOR_FAR, 0, H); fl.addColorStop(0, '#8a6a4a'); fl.addColorStop(1, '#c49a6c');
+  ctx.fillStyle = fl; ctx.fillRect(0, FLOOR_FAR, W, H - FLOOR_FAR);
+  ctx.strokeStyle = 'rgba(70,45,25,.35)'; ctx.lineWidth = 1;
+  for (let i = -6; i <= 6; i++) { const a = proj(i * .3, 1), b = proj(i * .3, -.2); ctx.beginPath(); ctx.moveTo(a.x, a.y); ctx.lineTo(b.x, b.y); ctx.stroke(); }
+  for (let z = 1; z > -.1; z -= .12) { const a = proj(-3, z), b = proj(3, z); ctx.beginPath(); ctx.moveTo(a.x, a.y); ctx.lineTo(b.x, b.y); ctx.stroke(); }
+  // 打擊區
+  const z1 = proj(-1.2, ZONE), z2 = proj(1.2, ZONE), z3 = proj(1.2, -.05), z4 = proj(-1.2, -.05);
+  ctx.fillStyle = `rgba(250,204,21,${.08 + .04 * Math.sin(time * 4)})`; ctx.beginPath(); ctx.moveTo(z1.x, z1.y); ctx.lineTo(z2.x, z2.y); ctx.lineTo(z3.x, z3.y); ctx.lineTo(z4.x, z4.y); ctx.fill();
+  ctx.strokeStyle = 'rgba(250,204,21,.55)'; ctx.setLineDash([8, 6]); ctx.lineWidth = 2; ctx.beginPath(); ctx.moveTo(z1.x, z1.y); ctx.lineTo(z2.x, z2.y); ctx.stroke(); ctx.setLineDash([]);
+  ctx.fillStyle = 'rgba(250,204,21,.75)'; ctx.font = '700 11px system-ui'; ctx.fillText('打擊區', 200, z1.y - 6);
+}
+function drawRat(x, y, s, type, bob, opts = {}) {
+  const T = TYPES[type], k = s * T.size;
+  ctx.save(); ctx.translate(x, y); if (opts.rot) ctx.rotate(opts.rot); ctx.scale(k, k);
+  const run = opts.still ? 0 : Math.sin(bob) * 3;
+  if (!opts.noShadow) { ctx.fillStyle = 'rgba(0,0,0,.25)'; ctx.beginPath(); ctx.ellipse(0, 26 + (opts.h || 0) / k, 30, 8, 0, 0, 7); ctx.fill(); }
+  // 尾巴
+  ctx.strokeStyle = '#f9a8d4'; ctx.lineWidth = 4; ctx.lineCap = 'round'; ctx.beginPath(); ctx.moveTo(14, 10); ctx.quadraticCurveTo(40, -10 + run * 2, 30, -30); ctx.stroke();
+  // 身體
+  ctx.fillStyle = T.col; ctx.beginPath(); ctx.ellipse(0, 6, 26, 22, 0, 0, 7); ctx.fill();
+  // 腳
+  ctx.fillStyle = '#f9a8d4'; ctx.beginPath(); ctx.ellipse(-12, 26 + run, 7, 4, 0, 0, 7); ctx.ellipse(12, 26 - run, 7, 4, 0, 0, 7); ctx.fill();
+  // 頭
+  ctx.fillStyle = T.col; ctx.beginPath(); ctx.arc(0, -16, 18, 0, 7); ctx.fill();
+  ctx.fillStyle = T.dark; ctx.beginPath(); ctx.arc(-17, -30, 11, 0, 7); ctx.arc(17, -30, 11, 0, 7); ctx.fill();
+  ctx.fillStyle = '#fbcfe8'; ctx.beginPath(); ctx.arc(-17, -30, 6.5, 0, 7); ctx.arc(17, -30, 6.5, 0, 7); ctx.fill();
+  // 臉
+  const angry = opts.jump;
+  ctx.fillStyle = type === 'bomb' ? '#f87171' : '#111'; ctx.beginPath(); ctx.arc(-7, -18, angry ? 4 : 3.4, 0, 7); ctx.arc(7, -18, angry ? 4 : 3.4, 0, 7); ctx.fill();
+  if (angry) { ctx.strokeStyle = '#111'; ctx.lineWidth = 2; ctx.beginPath(); ctx.moveTo(-12, -25); ctx.lineTo(-3, -22); ctx.moveTo(12, -25); ctx.lineTo(3, -22); ctx.stroke(); }
+  ctx.fillStyle = '#f472b6'; ctx.beginPath(); ctx.arc(0, -9, 3.5, 0, 7); ctx.fill();
+  ctx.strokeStyle = 'rgba(255,255,255,.7)'; ctx.lineWidth = 1; ctx.beginPath(); ctx.moveTo(-4, -8); ctx.lineTo(-20, -11); ctx.moveTo(-4, -6); ctx.lineTo(-20, -3); ctx.moveTo(4, -8); ctx.lineTo(20, -11); ctx.moveTo(4, -6); ctx.lineTo(20, -3); ctx.stroke();
+  if (angry) { ctx.fillStyle = '#fff'; ctx.fillRect(-4, -5, 3, 5); ctx.fillRect(1, -5, 3, 5); }
+  // 種類標記
+  ctx.font = '20px system-ui'; ctx.textAlign = 'center'; ctx.fillStyle = '#000';
+  if (type === 'bomb') { ctx.fillText('💣', 0, 16); const sp = Math.sin(time * 30) > 0; ctx.fillStyle = sp ? '#fde047' : '#f97316'; ctx.beginPath(); ctx.arc(10, -2, 3, 0, 7); ctx.fill(); }
+  if (type === 'gold') ctx.fillText('👑', 0, -32);
+  if (type === 'fat') { ctx.fillStyle = 'rgba(255,255,255,.18)'; ctx.beginPath(); ctx.ellipse(-8, 0, 8, 10, 0, 0, 7); ctx.fill(); }
+  if (type === 'fast' && !opts.still) { ctx.strokeStyle = 'rgba(255,255,255,.6)'; ctx.lineWidth = 2; for (const yy of [-6, 4, 14]) { ctx.beginPath(); ctx.moveTo(-34, yy); ctx.lineTo(-46, yy); ctx.moveTo(34, yy); ctx.lineTo(46, yy); ctx.stroke(); } }
+  if (opts.stun) { ctx.fillText('💫', 0, -42); }
+  ctx.restore();
+}
+function drawBat() {
+  // 身體與手（畫面下方）
+  const pivot = { x: 200, y: 652 };
+  let ang;
+  if (swing) { const k = Math.min(1, swing.t / .12); const from = swing.dir > 0 ? -2.3 : -.84, to = swing.dir > 0 ? -.4 : -2.75; ang = from + (to - from) * (1 - Math.pow(1 - k, 3)); }
+  else ang = -2.15 + Math.sin(time * 2) * .04 + (cool > .25 ? .3 : 0);
+  // 揮棒軌跡
+  if (swing && swing.t < .2) {
+    ctx.strokeStyle = `rgba(255,255,255,${.5 - swing.t * 2})`; ctx.lineWidth = 26; ctx.lineCap = 'round';
+    const from = swing.dir > 0 ? -2.3 : -.84; ctx.beginPath(); ctx.arc(pivot.x, pivot.y, 190, Math.min(from, ang), Math.max(from, ang)); ctx.stroke();
+  }
+  ctx.save(); ctx.translate(pivot.x, pivot.y); ctx.rotate(ang);
+  const g = ctx.createLinearGradient(0, -12, 0, 12); g.addColorStop(0, '#fde68a'); g.addColorStop(.5, '#d97706'); g.addColorStop(1, '#92400e');
+  ctx.fillStyle = g; ctx.beginPath(); ctx.moveTo(20, -5); ctx.lineTo(150, -12); ctx.quadraticCurveTo(222, -15, 224, 0); ctx.quadraticCurveTo(222, 15, 150, 12); ctx.lineTo(20, 5); ctx.closePath(); ctx.fill();
+  ctx.fillStyle = '#1f2937'; ctx.fillRect(14, -7, 34, 14);   // 握把膠帶
+  ctx.restore();
+  // 手套
+  ctx.fillStyle = '#dc2626'; ctx.beginPath(); ctx.arc(pivot.x + Math.cos(ang) * 30, pivot.y + Math.sin(ang) * 30, 16, 0, 7); ctx.fill();
+  ctx.fillStyle = '#fff'; ctx.beginPath(); ctx.arc(pivot.x + Math.cos(ang) * 30 - 4, pivot.y + Math.sin(ang) * 30 - 4, 4, 0, 7); ctx.fill();
+}
+function draw() {
+  ctx.setTransform(scale, 0, 0, scale, 0, 0);
+  const sx = shake > 0 ? (Math.random() - .5) * 16 * shake : 0, sy = shake > 0 ? (Math.random() - .5) * 16 * shake : 0;
+  ctx.translate(sx, sy);
+  drawRoom();
+  const list = rats.filter(r => !r.dead).sort((a, b) => b.z - a.z);
+  for (const r of list) { const p = proj(r.lx, r.z), h = r.jump > 0 ? Math.sin(Math.min(1, r.jump / JUMP_DUR) * Math.PI) * 150 * p.s : 0, sc = p.s * (r.jump > 0 ? 1 + Math.sin(Math.min(1, r.jump / JUMP_DUR) * Math.PI) * .35 : 1); drawRat(p.x, p.y - h - 22 * p.s * r.size, sc, r.type, r.bob, { jump: r.jump > 0, stun: r.stun > 0, still: r.pause > 0 || r.stun > 0, h }); }
+  for (const f of flying) {
+    if (f.air && f.y < -20) { ctx.font = `${16 + Math.sin(time * 20) * 4}px system-ui`; ctx.textAlign = 'center'; ctx.fillStyle = '#000'; ctx.fillText('⭐', Math.max(20, Math.min(W - 20, f.x)), 26); continue; }
+    drawRat(f.x, f.y, Math.max(.15, f.s), f.type, 0, { rot: f.rot, still: true, noShadow: true });
+  }
+  for (const p of parts) { ctx.globalAlpha = Math.min(1, p.t * 2.5); ctx.fillStyle = p.col; ctx.fillRect(p.x, p.y, p.sz, p.sz); } ctx.globalAlpha = 1;
+  drawBat();
+  for (const f of fx) { ctx.globalAlpha = Math.min(1, f.t * 2); ctx.font = f.big ? '900 26px system-ui' : '900 17px system-ui'; ctx.textAlign = 'center'; ctx.lineWidth = 5; ctx.strokeStyle = '#1c1410'; ctx.strokeText(f.s, f.x, f.y - (1 - f.t) * 16); ctx.fillStyle = f.col; ctx.fillText(f.s, f.x, f.y - (1 - f.t) * 16); ctx.globalAlpha = 1; }
+  ctx.setTransform(scale, 0, 0, scale, 0, 0);
+  if (flash > 0) { ctx.fillStyle = `rgba(239,68,68,${flash})`; ctx.fillRect(0, 0, W, H); }
+}
+
+let last = performance.now(), fast = 1;
+function loop(now) { const dt = Math.min(.033, (now - last) / 1000); last = now; for (let i = 0; i < fast; i++) update(dt); draw(); requestAnimationFrame(loop); }
+resize(); hud(); requestAnimationFrame(loop);
+window.__bt = { get state() { return state; }, get rats() { return rats; }, get score() { return score; }, get lives() { return lives; }, get level() { return level; }, get stats() { return { hr, hits, maxCombo }; }, ratScreen, doSwing, set fast(v) { fast = v; }, JUMP_DUR };
+})();
+</script>
+</body>
+</html>
