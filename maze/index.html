@@ -1,0 +1,432 @@
+<!DOCTYPE html>
+<html lang="zh-Hant">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1,maximum-scale=1,user-scalable=no">
+<title>迷宮大冒險</title>
+<style>
+  html,body{margin:0;height:100%;background:#0f1f17;color:#fff;font-family:system-ui,-apple-system,"PingFang TC","Noto Sans TC",sans-serif;overflow:hidden;touch-action:none;user-select:none;-webkit-user-select:none}
+  #app{max-width:520px;margin:0 auto;height:100%;display:flex;flex-direction:column}
+  #hud{display:flex;justify-content:space-between;align-items:center;padding:8px 12px 2px;font-size:11px;color:#bbf7d0}
+  #hud b{display:block;font-size:18px;color:#fff;font-variant-numeric:tabular-nums}
+  #tip{text-align:center;font-size:13px;height:18px;color:#fde047}
+  #wrap{position:relative;flex:1;min-height:0;display:flex;justify-content:center;align-items:center}
+  canvas{display:block;touch-action:none;border-radius:12px}
+  #ctrl{display:grid;grid-template-columns:1fr 64px 64px 64px 1fr;grid-template-rows:52px 52px;gap:6px;padding:6px 12px 14px;align-items:center}
+  #ctrl button{border:0;border-radius:14px;background:#1f3b2b;color:#fff;font-size:24px;font-weight:900;height:100%;box-shadow:0 4px 0 #0b1a12;touch-action:none}
+  #ctrl button:active,#ctrl button.on{transform:translateY(3px);box-shadow:0 1px 0 #0b1a12;background:#2d5a40}
+  #hint{grid-column:1;grid-row:1/3;font-size:14px!important;line-height:1.3;background:#7c5a12!important;box-shadow:0 4px 0 #3b2a06!important}
+  #hint small{display:block;font-size:11px;font-weight:600}
+  #menuBtn{grid-column:5;grid-row:1/3;font-size:14px!important;background:#334155!important;box-shadow:0 4px 0 #0f172a!important}
+  #bU{grid-column:3;grid-row:1}#bL{grid-column:2;grid-row:2}#bD{grid-column:3;grid-row:2}#bR{grid-column:4;grid-row:2}
+  .ov{position:absolute;inset:0;display:flex;align-items:center;justify-content:center;z-index:5}
+  .box{background:#132b1ef5;border:2px solid #4ade80;border-radius:16px;padding:18px;width:min(330px,90%);text-align:center}
+  .box h2{margin:0 0 6px;font-size:26px;color:#fde047}
+  .box p{font-size:12.5px;line-height:1.7;margin:6px 0 12px;text-align:left}
+  .lvs{display:grid;grid-template-columns:repeat(5,1fr);gap:6px;margin:8px 0 12px}
+  .lvs button{border:2px solid #ffffff22;border-radius:10px;background:#1f3b2b;color:#fff;font-size:17px;font-weight:900;padding:7px 0 5px}
+  .lvs button small{display:block;font-size:10px;color:#fde047;font-weight:600;min-height:12px}
+  .lvs button:disabled{opacity:.35}
+  .go{width:100%;background:#16a34a;color:#fff;border:0;border-radius:12px;padding:12px;font-size:16px;font-weight:800;margin-top:6px}
+  .go.alt{background:#334155}
+  .stars{font-size:34px;letter-spacing:4px;margin:4px 0}
+  .stats{display:grid;grid-template-columns:1fr 1fr;gap:6px;margin:8px 0 6px}
+  .stats div{background:#0006;border-radius:10px;padding:7px;font-size:11px}
+  .stats b{display:block;font-size:18px;color:#86efac}
+  [hidden]{display:none!important}
+</style>
+</head>
+<body>
+<div id="app">
+  <div id="hud">
+    <div>關卡<b id="hLv">1</b></div>
+    <div>時間<b id="hTime">0.0</b></div>
+    <div>步數<b id="hSteps">0</b></div>
+    <div>星星<b id="hStar">0/0</b></div>
+    <div style="text-align:right">道具<b id="hItem">—</b></div>
+  </div>
+  <div id="tip"></div>
+  <div id="wrap">
+    <canvas id="c"></canvas>
+    <div class="ov" id="menu"><div class="box">
+      <h2>🌀 迷宮大冒險</h2>
+      <p>從左下角的入口走到右上角的 <b>寶箱</b>！<br>
+      👆 <b>在迷宮上滑動</b>，角色會一路走到轉角或岔路才停；也可以用下方方向鍵一格一格走。<br>
+      🔑 有門的關卡要先拿到鑰匙　🌑 黑暗關卡只看得到身邊<br>
+      👻 碰到小鬼會被送回起點　⭐ 收集星星加分<br>
+      💡 卡關時按「提示」顯示路線（每關 3 次）</p>
+      <div class="lvs" id="lvs"></div>
+    </div></div>
+    <div class="ov" id="clear" hidden><div class="box">
+      <h2 id="cTitle"></h2>
+      <div class="stars" id="cStars"></div>
+      <div class="stats" id="cStats"></div>
+      <button class="go" id="cNext">下一關</button>
+      <button class="go alt" id="cMenu">選擇關卡</button>
+    </div></div>
+  </div>
+  <div id="ctrl">
+    <button id="hint">💡<br>提示<small id="hintN">3</small></button>
+    <button id="bU">▲</button>
+    <button id="bL">◀</button><button id="bD">▼</button><button id="bR">▶</button>
+    <button id="menuBtn">☰<br>關卡</button>
+  </div>
+</div>
+<script>
+(() => {
+const $ = id => document.getElementById(id);
+const W = 400, H = 400, PAD = 10;
+const N = 1, E = 2, S = 4, Wd = 8, DIRS = [[N, 0, -1, S], [E, 1, 0, Wd], [S, 0, 1, N], [Wd, -1, 0, E]];
+const LEVELS = [
+  { n: 8, name: '入門' },
+  { n: 10, stars: 5, name: '收集星星' },
+  { n: 11, key: 1, name: '鑰匙與門' },
+  { n: 12, ghosts: 1, stars: 4, name: '小鬼出沒' },
+  { n: 13, dark: 1, name: '黑暗迷宮' },
+  { n: 14, key: 1, ghosts: 1, name: '鬼守門' },
+  { n: 15, dark: 1, stars: 6, name: '摸黑尋星' },
+  { n: 16, key: 1, ghosts: 2, stars: 5, name: '雙鬼巡邏' },
+  { n: 18, dark: 1, ghosts: 1, name: '暗夜鬼影' },
+  { n: 20, dark: 1, key: 1, ghosts: 2, stars: 6, name: '終極迷宮' },
+];
+const cv = $('c'), ctx = cv.getContext('2d');
+let scale = 1;
+function resize() {
+  const wr = $('wrap').getBoundingClientRect();
+  const s = Math.min((wr.width - 8) / W, (wr.height - 8) / H), d = window.devicePixelRatio || 1;
+  cv.style.width = W * s + 'px'; cv.style.height = H * s + 'px';
+  cv.width = Math.round(W * s * d); cv.height = Math.round(H * s * d); scale = s * d;
+}
+addEventListener('resize', resize);
+
+/* 音效 */
+let ac = null;
+function initAudio() { if (!ac) { try { ac = new (window.AudioContext || window.webkitAudioContext)(); } catch (e) {} } else if (ac.state === 'suspended') ac.resume(); }
+function tone(f, d, type = 'sine', v = .06, f2, delay = 0) { if (!ac) return; const t = ac.currentTime + delay, o = ac.createOscillator(), g = ac.createGain(); o.type = type; o.frequency.setValueAtTime(f, t); if (f2) o.frequency.exponentialRampToValueAtTime(f2, t + d); g.gain.setValueAtTime(v, t); g.gain.exponentialRampToValueAtTime(.0001, t + d); o.connect(g).connect(ac.destination); o.start(t); o.stop(t + d + .02); }
+let stepFlip = 0;
+const sStep = () => { stepFlip ^= 1; tone(stepFlip ? 220 : 196, .04, 'triangle', .05); };
+const sBump = () => tone(110, .08, 'sine', .07);
+const sStar = () => { tone(1320, .08, 'sine', .07); tone(1760, .12, 'sine', .06, null, .06); };
+const sKey = () => [880, 1100, 1320].forEach((f, i) => tone(f, .1, 'triangle', .06, null, i * .06));
+const sDoor = () => { tone(300, .2, 'square', .05, 600); tone(900, .15, 'sine', .05, null, .15); };
+const sGhost = () => { tone(500, .5, 'sawtooth', .06, 120); };
+const sHint = () => tone(660, .25, 'sine', .05, 990);
+const sWin = () => [523, 659, 784, 1047, 1319].forEach((f, i) => tone(f, .18, 'sine', .07, null, i * .09));
+const vib = ms => { try { navigator.vibrate && navigator.vibrate(ms); } catch (e) {} };
+
+/* 紀錄 */
+let rec = {}; try { rec = JSON.parse(localStorage.getItem('mazeRec')) || {}; } catch (e) {}
+const saveRec = () => { try { localStorage.setItem('mazeRec', JSON.stringify(rec)); } catch (e) {} };
+function buildMenu() {
+  const box = $('lvs'); box.innerHTML = '';
+  LEVELS.forEach((L, i) => {
+    const r = rec[i], open = i === 0 || rec[i - 1];
+    const b = document.createElement('button'); b.disabled = !open;
+    b.innerHTML = `${i + 1}<small>${r ? '★'.repeat(r.stars) + '☆'.repeat(3 - r.stars) : open ? '' : '🔒'}</small>`;
+    b.onclick = () => { initAudio(); startLevel(i); };
+    box.appendChild(b);
+  });
+}
+
+/* 迷宮產生 */
+let lv = 0, L = LEVELS[0], n = 8, cell = 40, ox = 0, oy = 0, grid = [];
+let state = 'menu', time = 0, t = 0, steps = 0, hints = 3, hintPath = null, hintT = 0, fx = [], parts = [];
+let me = null, startC = null, exitC = null, keyC = null, doorC = null, hasKey = false, stars = [], got = 0, ghosts = [], visited = new Set(), queue = [], slide = null, inv = 0, chestOpen = 0;
+const idx = (x, y) => y * n + x;
+function carve() {
+  grid = new Array(n * n).fill(0);
+  const seen = new Array(n * n).fill(false), stack = [[0, n - 1]]; seen[idx(0, n - 1)] = true;
+  while (stack.length) {
+    const [x, y] = stack[stack.length - 1];
+    const opts = DIRS.filter(([, dx, dy]) => { const nx = x + dx, ny = y + dy; return nx >= 0 && ny >= 0 && nx < n && ny < n && !seen[idx(nx, ny)]; });
+    if (!opts.length) { stack.pop(); continue; }
+    const [d, dx, dy, od] = opts[(Math.random() * opts.length) | 0], nx = x + dx, ny = y + dy;
+    grid[idx(x, y)] |= d; grid[idx(nx, ny)] |= od; seen[idx(nx, ny)] = true; stack.push([nx, ny]);
+  }
+}
+function addLoops(k) {
+  for (let i = 0; i < k; i++) {
+    const x = (Math.random() * n) | 0, y = (Math.random() * n) | 0, [d, dx, dy, od] = DIRS[(Math.random() * 4) | 0], nx = x + dx, ny = y + dy;
+    if (nx < 0 || ny < 0 || nx >= n || ny >= n) continue;
+    grid[idx(x, y)] |= d; grid[idx(nx, ny)] |= od;
+  }
+}
+function bfs(from, blockDoor = true, goal = null) {
+  const dist = new Map(), prev = new Map(), q = [from]; dist.set(idx(from.x, from.y), 0);
+  while (q.length) {
+    const c = q.shift(), k = idx(c.x, c.y);
+    if (goal && c.x === goal.x && c.y === goal.y) break;
+    for (const [d, dx, dy] of DIRS) {
+      if (!(grid[k] & d)) continue;
+      const nx = c.x + dx, ny = c.y + dy, nk = idx(nx, ny);
+      if (dist.has(nk)) continue;
+      if (blockDoor && doorC && !hasKey && nx === doorC.x && ny === doorC.y) continue;
+      dist.set(nk, dist.get(k) + 1); prev.set(nk, k); q.push({ x: nx, y: ny });
+    }
+  }
+  return { dist, prev };
+}
+function pathTo(from, goal, blockDoor = true) {
+  const { prev, dist } = bfs(from, blockDoor, goal); let k = idx(goal.x, goal.y);
+  if (!dist.has(k)) return null;
+  const p = []; while (k !== undefined) { p.unshift({ x: k % n, y: (k / n) | 0 }); k = prev.get(k); }
+  return p;
+}
+const openCount = k => [N, E, S, Wd].filter(d => grid[k] & d).length;
+function genLevel() {
+  n = L.n; cell = (W - PAD * 2) / n; ox = PAD; oy = PAD;
+  carve();
+  startC = { x: 0, y: n - 1 }; exitC = { x: n - 1, y: 0 };
+  doorC = keyC = null; hasKey = false;
+  if (L.key) {
+    // 門放在出口路線上靠近出口處，鑰匙放在門前這一側最遠的死路
+    const path = pathTo(startC, exitC, false);
+    doorC = path[Math.floor(path.length * .72)];
+    const onPath = new Set(path.map(c => idx(c.x, c.y)));
+    const { dist } = bfs(startC, true);
+    let best = null, bd = -1;
+    for (const [k, d] of dist) { if (onPath.has(k) || k === idx(startC.x, startC.y)) continue; const sc = d + (openCount(k) === 1 ? 6 : 0); if (sc > bd) { bd = sc; best = k; } }
+    keyC = { x: best % n, y: (best / n) | 0 };
+  } else addLoops(Math.round(n * n * .06));
+  // 星星
+  stars = [];
+  const used = new Set([idx(startC.x, startC.y), idx(exitC.x, exitC.y)]); if (keyC) used.add(idx(keyC.x, keyC.y)); if (doorC) used.add(idx(doorC.x, doorC.y));
+  const ends = []; for (let k = 0; k < n * n; k++) if (!used.has(k) && openCount(k) === 1) ends.push(k);
+  ends.sort(() => Math.random() - .5);
+  const reach = L.key ? null : bfs(startC, false).dist;
+  for (let i = 0; i < (L.stars || 0); i++) {
+    let k = ends.pop(); if (k === undefined) { do { k = (Math.random() * n * n) | 0; } while (used.has(k)); }
+    used.add(k); stars.push({ x: k % n, y: (k / n) | 0, got: false });
+  }
+  // 小鬼：起點遠處
+  ghosts = [];
+  const far = bfs(startC, false).dist;
+  const cand = [...far].filter(([k, d]) => d > n * .9 && !used.has(k)).map(([k]) => k);
+  for (let i = 0; i < (L.ghosts || 0); i++) {
+    const k = cand[(Math.random() * cand.length) | 0] ?? (n * n - 1 - i);
+    ghosts.push({ x: k % n, y: (k / n) | 0, fx: k % n, fy: (k / n) | 0, tx: k % n, ty: (k / n) | 0, p: 1, dir: -1, spd: 2 + lv * .1 + i * .3 });
+  }
+}
+function startLevel(i) {
+  lv = i; L = LEVELS[i]; genLevel();
+  me = { x: startC.x, y: startC.y, fx: startC.x, fy: startC.y, p: 1, face: 1 };
+  t = 0; steps = 0; hints = 3; hintPath = null; got = 0; visited = new Set([idx(me.x, me.y)]); queue = []; slide = null; inv = 0; chestOpen = 0; fx = []; parts = [];
+  state = 'play'; $('menu').hidden = true; $('clear').hidden = true;
+  setTip(`第 ${i + 1} 關：${L.name}${L.key ? '　先找 🔑' : ''}`); hud();
+}
+function setTip(s) { $('tip').textContent = s; }
+function hud() {
+  $('hLv').textContent = `${lv + 1}/10`; $('hTime').textContent = t.toFixed(1); $('hSteps').textContent = steps;
+  $('hStar').textContent = stars.length ? `${got}/${stars.length}` : '—';
+  $('hItem').textContent = L.key ? (hasKey ? '🔑' : '🔒') : '—';
+  $('hintN').textContent = hints;
+}
+
+/* 移動 */
+function canGo(x, y, d) {
+  const D = DIRS.find(q => q[0] === d); if (!(grid[idx(x, y)] & d)) return false;
+  const nx = x + D[1], ny = y + D[2];
+  if (doorC && !hasKey && nx === doorC.x && ny === doorC.y) return 'door';
+  return true;
+}
+function tryStep(d) {
+  if (state !== 'play' || me.p < 1) return false;
+  const r = canGo(me.x, me.y, d);
+  if (r === 'door') { if (!fx.some(f => f.door)) fx.push({ s: '🔒 需要鑰匙！', x: me.x, y: me.y, t: 1, col: '#fca5a5', door: 1 }); sBump(); return false; }
+  if (!r) { sBump(); return false; }
+  const D = DIRS.find(q => q[0] === d);
+  me.fx = me.x; me.fy = me.y; me.x += D[1]; me.y += D[2]; me.p = 0; me.face = D[1] || me.face;
+  steps++; sStep(); visited.add(idx(me.x, me.y)); return true;
+}
+function corridorContinue(d) {
+  // 是否繼續直走：這格只有前後兩個出口
+  const k = idx(me.x, me.y), back = DIRS.find(q => q[0] === d)[3];
+  if (me.x === exitC.x && me.y === exitC.y) return false;
+  if (keyC && !hasKey && me.x === keyC.x && me.y === keyC.y) return false;
+  const opens = [N, E, S, Wd].filter(q => grid[k] & q);
+  return opens.length === 2 && opens.includes(d) && opens.includes(back);
+}
+function arrive() {
+  if (keyC && !hasKey && me.x === keyC.x && me.y === keyC.y) { hasKey = true; sKey(); vib(30); fx.push({ s: '拿到鑰匙！🔑', x: me.x, y: me.y, t: 1.2, col: '#fde047' }); setTip('去開門！'); hud(); }
+  if (doorC && hasKey && me.x === doorC.x && me.y === doorC.y && !doorC.open) { doorC.open = true; sDoor(); fx.push({ s: '門打開了！', x: me.x, y: me.y, t: 1, col: '#86efac' }); }
+  for (const s of stars) if (!s.got && s.x === me.x && s.y === me.y) { s.got = true; got++; sStar(); burst(me.x, me.y, '#fde047'); hud(); }
+  if (me.x === exitC.x && me.y === exitC.y) win();
+}
+function burst(cx, cy, col) { const x = ox + (cx + .5) * cell, y = oy + (cy + .5) * cell; for (let i = 0; i < 12; i++) { const a = Math.random() * 7, s = 40 + Math.random() * 90; parts.push({ x, y, vx: Math.cos(a) * s, vy: Math.sin(a) * s, t: .6, col }); } }
+function win() {
+  state = 'win'; chestOpen = .001; sWin(); vib([40, 40, 80]); queue = []; slide = null;
+  for (let i = 0; i < 4; i++) setTimeout(() => burst(exitC.x + (Math.random() - .5) * 2, exitC.y + Math.random() * 2, `hsl(${Math.random() * 360},90%,65%)`), i * 200);
+  const cells = n * n, par = cells * .22 + 6 + (L.key ? n * 1.5 : 0) + (L.dark ? n : 0);
+  let st = t <= par ? 3 : t <= par * 1.7 ? 2 : 1;
+  if (hints < 3) st = Math.min(st, hints === 2 ? 2 : 1);
+  if (stars.length && got < stars.length) st = Math.max(1, st - 1);
+  const old = rec[lv]; const nb = !old || t < old.time;
+  rec[lv] = { stars: Math.max(st, old?.stars || 0), time: nb ? +t.toFixed(1) : old.time }; saveRec(); buildMenu();
+  setTimeout(() => {
+    $('cTitle').textContent = lv === 9 ? '🏆 全部破關！' : `第 ${lv + 1} 關過關！`;
+    $('cStars').textContent = '★'.repeat(st) + '☆'.repeat(3 - st);
+    $('cStats').innerHTML = `<div>時間<b>${t.toFixed(1)} 秒${nb ? ' 🆕' : ''}</b></div><div>步數<b>${steps}</b></div><div>星星<b>${stars.length ? `${got}/${stars.length}` : '—'}</b></div><div>最佳時間<b>${rec[lv].time} 秒</b></div>`;
+    $('cNext').hidden = lv === 9; $('clear').hidden = false;
+  }, 1100);
+}
+function caught() {
+  if (inv > 0) return;
+  sGhost(); vib([80, 40, 120]); fx.push({ s: '👻 被抓到了！回起點', x: me.x, y: me.y, t: 1.3, col: '#c4b5fd' });
+  me.x = me.fx = startC.x; me.y = me.fy = startC.y; me.p = 1; queue = []; slide = null; inv = 2;
+}
+$('cNext').onclick = () => { initAudio(); startLevel(lv + 1); };
+$('cMenu').onclick = () => { $('clear').hidden = true; showMenu(); };
+$('menuBtn').onclick = () => { initAudio(); showMenu(); };
+function showMenu() { state = 'menu'; $('clear').hidden = true; buildMenu(); $('menu').hidden = false; }
+$('hint').onclick = () => {
+  initAudio(); if (state !== 'play' || hints <= 0) return;
+  const goal = keyC && !hasKey ? keyC : exitC;
+  hintPath = pathTo({ x: me.x, y: me.y }, goal); hintT = 3; hints--; sHint(); hud();
+};
+
+/* 操作：滑動、方向鍵、鍵盤 */
+const toLocal = e => { const r = cv.getBoundingClientRect(); return { x: (e.clientX - r.left) / r.width * W, y: (e.clientY - r.top) / r.height * H }; };
+let sw = null;
+cv.addEventListener('pointerdown', e => { initAudio(); try { cv.setPointerCapture(e.pointerId); } catch (er) {} sw = { id: e.pointerId, ...toLocal(e), fired: false }; });
+cv.addEventListener('pointermove', e => {
+  if (!sw || e.pointerId !== sw.id || sw.fired) return;
+  const q = toLocal(e), dx = q.x - sw.x, dy = q.y - sw.y;
+  if (Math.hypot(dx, dy) < 22) return;
+  const d = Math.abs(dx) > Math.abs(dy) ? (dx > 0 ? E : Wd) : (dy > 0 ? S : N);
+  startSlide(d); sw = { id: sw.id, ...q, fired: false };   // 連續滑可以接著轉彎
+});
+cv.addEventListener('pointerup', () => sw = null); cv.addEventListener('pointercancel', () => sw = null);
+function startSlide(d) { if (state !== 'play') return; slide = { d }; }
+const holdBtn = (id, d) => {
+  const b = $(id); let iv = null;
+  const go = () => { queue.push(d); };
+  b.addEventListener('pointerdown', e => { initAudio(); e.preventDefault(); slide = null; go(); clearInterval(iv); iv = setInterval(go, 170); });
+  const stop = () => { clearInterval(iv); iv = null; };
+  b.addEventListener('pointerup', stop); b.addEventListener('pointercancel', stop); b.addEventListener('pointerleave', stop);
+};
+holdBtn('bU', N); holdBtn('bD', S); holdBtn('bL', Wd); holdBtn('bR', E);
+addEventListener('keydown', e => { const m = { ArrowUp: N, ArrowDown: S, ArrowLeft: Wd, ArrowRight: E, KeyW: N, KeyS: S, KeyA: Wd, KeyD: E }[e.code]; if (m) { e.preventDefault(); initAudio(); slide = null; queue.push(m); } });
+
+/* 更新 */
+function update(dt) {
+  time += dt;
+  fx.forEach(f => f.t -= dt); fx = fx.filter(f => f.t > 0);
+  parts.forEach(p => { p.t -= dt; p.x += p.vx * dt; p.y += p.vy * dt; p.vy += 80 * dt; }); parts = parts.filter(p => p.t > 0);
+  if (chestOpen > 0) chestOpen = Math.min(1, chestOpen + dt * 3);
+  if (state !== 'play') return;
+  t += dt; inv = Math.max(0, inv - dt); hintT = Math.max(0, hintT - dt); if (hintT <= 0) hintPath = null;
+  // 玩家動畫
+  if (me.p < 1) { me.p = Math.min(1, me.p + dt * 11); if (me.p >= 1) { arrive(); if (slide && state === 'play' && !corridorContinue(slide.d)) slide = null; } }
+  if (me.p >= 1 && state === 'play') {
+    if (slide) { if (!tryStep(slide.d)) slide = null; }
+    else if (queue.length) { tryStep(queue.shift()); if (queue.length > 2) queue.length = 2; }
+  }
+  // 小鬼
+  for (const g of ghosts) {
+    g.p += dt * g.spd;
+    if (g.p >= 1) {
+      g.p = 0; g.fx = g.tx; g.fy = g.ty; g.x = g.tx; g.y = g.ty;
+      const k = idx(g.x, g.y), back = g.dir >= 0 ? DIRS[g.dir][3] : 0;
+      let opts = DIRS.map((q, i) => [q, i]).filter(([q]) => (grid[k] & q[0]) && !(doorC && g.x + q[1] === doorC.x && g.y + q[2] === doorC.y));
+      const fwd = opts.filter(([q]) => q[0] !== back); if (fwd.length) opts = fwd;
+      // 中級以後偶爾追人
+      if (lv >= 7 && Math.random() < .35) { opts.sort((a, b) => Math.hypot(g.x + a[0][1] - me.x, g.y + a[0][2] - me.y) - Math.hypot(g.x + b[0][1] - me.x, g.y + b[0][2] - me.y)); opts = [opts[0]]; }
+      const [q, i] = opts[(Math.random() * opts.length) | 0]; g.dir = i; g.tx = g.x + q[1]; g.ty = g.y + q[2];
+    }
+    const gx = g.fx + (g.tx - g.fx) * g.p, gy = g.fy + (g.ty - g.fy) * g.p, mx = me.fx + (me.x - me.fx) * me.p, my = me.fy + (me.y - me.fy) * me.p;
+    if (Math.hypot(gx - mx, gy - my) < .55) caught();
+  }
+  hud();
+}
+
+/* 繪圖 */
+function cx(x) { return ox + (x + .5) * cell; } function cy(y) { return oy + (y + .5) * cell; }
+function drawEmoji(e, x, y, s) { ctx.font = `${s}px system-ui`; ctx.textAlign = 'center'; ctx.textBaseline = 'middle'; ctx.fillText(e, x, y); ctx.textBaseline = 'alphabetic'; }
+function draw() {
+  ctx.setTransform(scale, 0, 0, scale, 0, 0);
+  ctx.fillStyle = '#0f1f17'; ctx.fillRect(0, 0, W, H);
+  if (!grid.length) return;
+  // 地板（棋盤草地）
+  for (let y = 0; y < n; y++) for (let x = 0; x < n; x++) { ctx.fillStyle = (x + y) % 2 ? '#3f7d3a' : '#46883f'; ctx.fillRect(ox + x * cell, oy + y * cell, cell + .5, cell + .5); }
+  // 腳印
+  ctx.fillStyle = 'rgba(253,230,138,.22)';
+  for (const k of visited) { const x = k % n, y = (k / n) | 0; ctx.beginPath(); ctx.arc(cx(x) - cell * .1, cy(y) + cell * .05, cell * .07, 0, 7); ctx.arc(cx(x) + cell * .1, cy(y) - cell * .05, cell * .07, 0, 7); ctx.fill(); }
+  // 提示路線
+  if (hintPath) { ctx.strokeStyle = `rgba(250,204,21,${Math.min(1, hintT) * .85})`; ctx.lineWidth = cell * .2; ctx.lineCap = 'round'; ctx.lineJoin = 'round'; ctx.setLineDash([cell * .3, cell * .25]); ctx.beginPath(); hintPath.forEach((p, i) => i ? ctx.lineTo(cx(p.x), cy(p.y)) : ctx.moveTo(cx(p.x), cy(p.y))); ctx.stroke(); ctx.setLineDash([]); }
+  // 起點、出口、道具
+  ctx.fillStyle = 'rgba(96,165,250,.35)'; ctx.fillRect(ox + startC.x * cell + 2, oy + startC.y * cell + 2, cell - 4, cell - 4);
+  drawChest(cx(exitC.x), cy(exitC.y));
+  for (const s of stars) if (!s.got) drawEmoji('⭐', cx(s.x), cy(s.y) + Math.sin(time * 4 + s.x) * cell * .04, cell * .62);
+  if (keyC && !hasKey) drawEmoji('🔑', cx(keyC.x), cy(keyC.y) + Math.sin(time * 5) * cell * .05, cell * .66);
+  if (doorC && !doorC.open) {
+    const x = ox + doorC.x * cell, y = oy + doorC.y * cell;
+    ctx.fillStyle = '#7c2d12'; ctx.fillRect(x + cell * .1, y + cell * .1, cell * .8, cell * .8);
+    ctx.strokeStyle = '#451a03'; ctx.lineWidth = 2; ctx.strokeRect(x + cell * .1, y + cell * .1, cell * .8, cell * .8);
+    ctx.beginPath(); ctx.moveTo(x + cell * .5, y + cell * .1); ctx.lineTo(x + cell * .5, y + cell * .9); ctx.stroke();
+    drawEmoji('🔒', x + cell * .5, y + cell * .52, cell * .45);
+  }
+  // 牆（先畫陰影再畫石牆）
+  const th = Math.max(3, cell * .2);
+  for (const pass of [0, 1]) {
+    ctx.fillStyle = pass ? '#8b6b4a' : 'rgba(0,0,0,.35)';
+    const off = pass ? 0 : th * .45;
+    for (let y = 0; y < n; y++) for (let x = 0; x < n; x++) {
+      const k = grid[idx(x, y)], X = ox + x * cell + off, Y = oy + y * cell + off;
+      if (!(k & N)) ctx.fillRect(X - th / 2, Y - th / 2, cell + th, th);
+      if (!(k & Wd)) ctx.fillRect(X - th / 2, Y - th / 2, th, cell + th);
+      if (x === n - 1 && !(k & E)) ctx.fillRect(X + cell - th / 2, Y - th / 2, th, cell + th);
+      if (y === n - 1 && !(k & S)) ctx.fillRect(X - th / 2, Y + cell - th / 2, cell + th, th);
+    }
+  }
+  ctx.fillStyle = 'rgba(255,255,255,.18)';
+  for (let y = 0; y < n; y++) for (let x = 0; x < n; x++) { const k = grid[idx(x, y)], X = ox + x * cell, Y = oy + y * cell; if (!(k & N)) ctx.fillRect(X - th / 2, Y - th / 2, cell + th, th * .3); }
+  // 小鬼
+  for (const g of ghosts) {
+    const gx = cx(g.fx + (g.tx - g.fx) * g.p), gy = cy(g.fy + (g.ty - g.fy) * g.p) + Math.sin(time * 6 + g.spd) * cell * .05, r = cell * .36;
+    ctx.fillStyle = 'rgba(245,243,255,.92)'; ctx.beginPath(); ctx.arc(gx, gy - r * .15, r, Math.PI, 0); ctx.lineTo(gx + r, gy + r * .75);
+    for (let i = 0; i < 4; i++) ctx.lineTo(gx + r - (i + .5) * r / 2, gy + r * (i % 2 ? .75 : .45));
+    ctx.lineTo(gx - r, gy + r * .75); ctx.closePath(); ctx.fill();
+    ctx.fillStyle = '#1e1b4b'; ctx.beginPath(); ctx.arc(gx - r * .35, gy - r * .2, r * .17, 0, 7); ctx.arc(gx + r * .35, gy - r * .2, r * .17, 0, 7); ctx.fill();
+  }
+  // 玩家
+  const mx = cx(me.fx + (me.x - me.fx) * me.p), my = cy(me.fy + (me.y - me.fy) * me.p), r = cell * .34, bob = me.p < 1 ? Math.sin(me.p * Math.PI) * cell * .06 : 0;
+  if (!(inv > 0 && Math.floor(time * 10) % 2)) {
+    ctx.fillStyle = 'rgba(0,0,0,.3)'; ctx.beginPath(); ctx.ellipse(mx, my + r * .85, r * .8, r * .25, 0, 0, 7); ctx.fill();
+    const g = ctx.createRadialGradient(mx - r * .3, my - r * .4 - bob, r * .2, mx, my - bob, r); g.addColorStop(0, '#7dd3fc'); g.addColorStop(1, '#2563eb');
+    ctx.fillStyle = g; ctx.beginPath(); ctx.arc(mx, my - bob, r, 0, 7); ctx.fill();
+    ctx.fillStyle = '#fff'; const ex = me.face * r * .18; ctx.beginPath(); ctx.arc(mx - r * .3 + ex, my - r * .15 - bob, r * .22, 0, 7); ctx.arc(mx + r * .3 + ex, my - r * .15 - bob, r * .22, 0, 7); ctx.fill();
+    ctx.fillStyle = '#111'; ctx.beginPath(); ctx.arc(mx - r * .3 + ex * 1.6, my - r * .15 - bob, r * .1, 0, 7); ctx.arc(mx + r * .3 + ex * 1.6, my - r * .15 - bob, r * .1, 0, 7); ctx.fill();
+    ctx.fillStyle = '#fb7185'; ctx.beginPath(); ctx.arc(mx - r * .55, my + r * .2 - bob, r * .12, 0, 7); ctx.arc(mx + r * .55, my + r * .2 - bob, r * .12, 0, 7); ctx.fill();
+    if (hasKey) drawEmoji('🔑', mx + r * .9, my - r * .9 - bob, cell * .35);
+  }
+  // 黑暗
+  if (L.dark && state === 'play') {
+    const rad = cell * 2.8, gd = ctx.createRadialGradient(mx, my, rad * .45, mx, my, rad);
+    gd.addColorStop(0, 'rgba(3,7,18,0)'); gd.addColorStop(1, 'rgba(3,7,18,.97)');
+    ctx.fillStyle = gd; ctx.fillRect(0, 0, W, H);
+    // 出口微光
+    ctx.fillStyle = `rgba(250,204,21,${.3 + .2 * Math.sin(time * 3)})`; ctx.beginPath(); ctx.arc(cx(exitC.x), cy(exitC.y), cell * .25, 0, 7); ctx.fill();
+  }
+  for (const p of parts) { ctx.globalAlpha = Math.min(1, p.t * 2); ctx.fillStyle = p.col; ctx.fillRect(p.x, p.y, 3, 3); } ctx.globalAlpha = 1;
+  for (const f of fx) { ctx.globalAlpha = Math.min(1, f.t * 2); ctx.font = '900 16px system-ui'; ctx.textAlign = 'center'; const x = Math.max(70, Math.min(W - 70, cx(f.x))), y = Math.max(30, cy(f.y) - cell * .6 - (1.2 - f.t) * 14); ctx.lineWidth = 4; ctx.strokeStyle = '#000'; ctx.strokeText(f.s, x, y); ctx.fillStyle = f.col; ctx.fillText(f.s, x, y); ctx.globalAlpha = 1; }
+}
+function drawChest(x, y) {
+  const w = cell * .7, h = cell * .48, open = chestOpen;
+  ctx.fillStyle = 'rgba(0,0,0,.3)'; ctx.fillRect(x - w / 2 + 2, y - h / 2 + 4, w, h);
+  ctx.fillStyle = '#a16207'; ctx.fillRect(x - w / 2, y - h * .1, w, h * .6);
+  ctx.fillStyle = '#facc15'; ctx.fillRect(x - w / 2, y - h * .1, w, h * .1); ctx.fillRect(x - w * .07, y - h * .1, w * .14, h * .6);
+  if (open > 0) { ctx.fillStyle = `rgba(253,224,71,${open})`; ctx.beginPath(); ctx.arc(x, y - h * .1, w * .45 * open, Math.PI, 0); ctx.fill(); }
+  ctx.save(); ctx.translate(x, y - h * .1); ctx.rotate(-open * 1.1);
+  ctx.fillStyle = '#b45309'; ctx.beginPath(); ctx.roundRect(-w / 2, -h * .45, w, h * .45, [w * .25, w * .25, 0, 0]); ctx.fill();
+  ctx.fillStyle = '#facc15'; ctx.fillRect(-w * .07, -h * .45, w * .14, h * .45); ctx.restore();
+}
+
+let last = performance.now(), fast = 1;
+function loop(now) { const dt = Math.min(.033, (now - last) / 1000); last = now; for (let i = 0; i < fast; i++) update(dt); draw(); requestAnimationFrame(loop); }
+resize(); buildMenu(); requestAnimationFrame(loop);
+window.__mz = { get state() { return state; }, get lv() { return lv; }, get me() { return me; }, get ghosts() { return ghosts; }, get hasKey() { return hasKey; }, get keyC() { return keyC; }, get exitC() { return exitC; }, get doorC() { return doorC; }, get grid() { return grid; }, get n() { return n; }, get t() { return t; },
+  path: g => pathTo({ x: me.x, y: me.y }, g), push: d => queue.push(d), slide: d => startSlide(d), startLevel, set fast(v) { fast = v; }, D: { N, E, S, W: Wd } };
+})();
+</script>
+</body>
+</html>
