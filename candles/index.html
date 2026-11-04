@@ -1,0 +1,279 @@
+<!DOCTYPE html>
+<html lang="zh-Hant">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1,maximum-scale=1,user-scalable=no">
+<title>吹蠟燭</title>
+<style>
+  html,body{margin:0;height:100%;background:#1a0f24;color:#fff;font-family:system-ui,-apple-system,"PingFang TC","Noto Sans TC",sans-serif;overflow:hidden;touch-action:none;user-select:none;-webkit-user-select:none}
+  #app{max-width:520px;margin:0 auto;height:100%;display:flex;flex-direction:column}
+  #hud{display:flex;justify-content:space-between;align-items:center;padding:8px 12px 2px;font-size:11px;color:#f5d0fe}
+  #hud b{display:block;font-size:18px;color:#fff;font-variant-numeric:tabular-nums}
+  #tip{text-align:center;font-size:13px;min-height:18px;color:#fde047;padding:0 8px}
+  #wrap{position:relative;flex:1;min-height:0;display:flex;justify-content:center;align-items:center}
+  canvas{display:block;touch-action:none;border-radius:12px}
+  #ctrl{padding:6px 12px 14px;display:flex;gap:8px}
+  #blowBtn{flex:1;border:0;border-radius:14px;background:#6b21a8;color:#fff;font-size:15px;font-weight:800;padding:12px;box-shadow:0 4px 0 #3b0764;touch-action:none}
+  #blowBtn.on{transform:translateY(3px);box-shadow:0 1px 0 #3b0764;background:#9333ea}
+  .ov{position:absolute;inset:0;display:flex;align-items:center;justify-content:center;z-index:5}
+  .box{background:#2a1538f5;border:2px solid #e879f9;border-radius:16px;padding:18px;width:min(330px,90%);text-align:center;max-height:94%;overflow:auto}
+  .box h2{margin:0 0 6px;font-size:26px;color:#fde047}
+  .box p{font-size:12.5px;line-height:1.75;margin:6px 0 12px;text-align:left}
+  .box input{width:100%;box-sizing:border-box;border:2px solid #e879f9;border-radius:10px;background:#1a0f24;color:#fff;font-size:16px;padding:10px;text-align:center;margin-bottom:6px}
+  .go{width:100%;background:#c026d3;color:#fff;border:0;border-radius:12px;padding:12px;font-size:16px;font-weight:800;margin-top:6px}
+  .go.alt{background:#475569}
+  .note{font-size:11px;color:#f5d0fe;margin-top:8px;line-height:1.6}
+  .stats{display:grid;grid-template-columns:1fr 1fr;gap:6px;margin:8px 0 6px}
+  .stats div{background:#0007;border-radius:10px;padding:7px;font-size:11px}
+  .stats b{display:block;font-size:18px;color:#fde047}
+  [hidden]{display:none!important}
+</style>
+</head>
+<body>
+<div id="app">
+  <div id="hud">
+    <div>關卡<b id="hLv">1</b></div>
+    <div>時間<b id="hTime">15</b></div>
+    <div>蠟燭<b id="hCnt">0/0</b></div>
+    <div style="text-align:right">最佳<b id="hBest">—</b></div>
+  </div>
+  <div id="tip"></div>
+  <div id="wrap">
+    <canvas id="c"></canvas>
+    <div class="ov" id="menu"><div class="box">
+      <h2>🎂 吹蠟燭</h2>
+      <p>🌬️ <b>對著手機麥克風吹氣</b>，把蛋糕上的蠟燭全部吹熄！<br>
+      吹得越用力火焰越歪，要<b>吹夠久</b>才會熄。<br>
+      🫁 右邊有<b>肺活量條</b>，用完要停一下換氣。<br>
+      😈 紫色的<b>惡作劇蠟燭</b>熄了一下又會自己點燃，要最後一起吹熄！</p>
+      <input id="name" maxlength="10" placeholder="壽星名字（可不填）">
+      <button class="go" id="start">🎤 開始（會詢問麥克風權限）</button>
+      <div class="note">開始時會先安靜 1 秒，測量環境噪音。<br>聲音只在手機上即時分析，不會錄音、不會上傳。<br>沒有麥克風或不允許時，可以<b>按住下方按鈕</b>模擬吹氣。</div>
+    </div></div>
+    <div class="ov" id="over" hidden><div class="box">
+      <h2 id="oTitle"></h2>
+      <div class="stats" id="oStats"></div>
+      <button class="go" id="oNext">下一關</button>
+      <button class="go alt" id="oAgain">再吹一次</button>
+    </div></div>
+  </div>
+  <div id="ctrl"><button id="blowBtn">🌬️ 按住模擬吹氣（沒有麥克風時用）</button></div>
+</div>
+<script>
+(() => {
+const $ = id => document.getElementById(id);
+const W = 400, H = 560;
+const LEVELS = [
+  { n: 3, hard: 0, trick: 0, time: 15 }, { n: 5, hard: 0, trick: 0, time: 15 }, { n: 6, hard: 1, trick: 0, time: 15 },
+  { n: 7, hard: 1, trick: 1, time: 18 }, { n: 8, hard: 2, trick: 2, time: 20 }, { n: 10, hard: 3, trick: 3, time: 22 },
+];
+const cv = $('c'), ctx = cv.getContext('2d');
+let scale = 1;
+function resize() {
+  const wr = $('wrap').getBoundingClientRect();
+  const s = Math.min((wr.width - 6) / W, (wr.height - 6) / H), d = window.devicePixelRatio || 1;
+  cv.style.width = W * s + 'px'; cv.style.height = H * s + 'px';
+  cv.width = Math.round(W * s * d); cv.height = Math.round(H * s * d); scale = s * d;
+}
+addEventListener('resize', resize);
+
+/* 音效 */
+let ac = null;
+function initAudio() { if (!ac) { try { ac = new (window.AudioContext || window.webkitAudioContext)(); } catch (e) {} } else if (ac.state === 'suspended') ac.resume(); }
+function tone(f, d, type = 'sine', v = .07, f2, delay = 0) { if (!ac) return; const t = ac.currentTime + delay, o = ac.createOscillator(), g = ac.createGain(); o.type = type; o.frequency.setValueAtTime(f, t); if (f2) o.frequency.exponentialRampToValueAtTime(f2, t + d); g.gain.setValueAtTime(v, t); g.gain.exponentialRampToValueAtTime(.0001, t + d); o.connect(g).connect(ac.destination); o.start(t); o.stop(t + d + .02); }
+const sOut = () => { tone(600, .15, 'sine', .05, 300); };
+const sRelight = () => tone(300, .2, 'triangle', .06, 900);
+// 生日快樂旋律（公有領域旋律，只用音符）
+function playBirthday() {
+  const C = 523.25, notes = [[C*.75,1],[C*.75,.5],[C*.84,1.5],[C*.75,1.5],[C,1.5],[C*.94,3],[C*.75,1],[C*.75,.5],[C*.84,1.5],[C*.75,1.5],[C*1.12,1.5],[C,3],[C*.75,1],[C*.75,.5],[C*1.5,1.5],[C*1.26,1.5],[C,1.5],[C*.94,1.5],[C*.84,3],[C*1.33,1],[C*1.33,.5],[C*1.26,1.5],[C,1.5],[C*1.12,1.5],[C,3]];
+  let t = 0; for (const [f, d] of notes) { tone(f, d * .32, 'triangle', .07, null, t); tone(f * 2, d * .2, 'sine', .02, null, t); t += d * .3; }
+}
+const vib = ms => { try { navigator.vibrate && navigator.vibrate(ms); } catch (e) {} };
+
+/* 麥克風 */
+let mic = null, floorDb = -70, level = 0, rawDb = -100, calib = 0, calibSum = 0, calibN = 0, fakeBlow = false;
+async function initMic() {
+  if (mic) return true;
+  try {
+    const stream = await navigator.mediaDevices.getUserMedia({ audio: { echoCancellation: false, noiseSuppression: false, autoGainControl: false } });
+    const src = ac.createMediaStreamSource(stream), an = ac.createAnalyser(); an.fftSize = 1024; src.connect(an);
+    mic = { an, buf: new Float32Array(an.fftSize) }; return true;
+  } catch (e) { mic = null; return false; }
+}
+function readMic(dt) {
+  if (mic) {
+    mic.an.getFloatTimeDomainData(mic.buf); let s = 0; for (const v of mic.buf) s += v * v;
+    rawDb = 10 * Math.log10(s / mic.buf.length + 1e-10);
+    if (calib > 0) { calib -= dt; calibSum += rawDb; calibN++; if (calib <= 0) floorDb = calibSum / calibN; }
+  }
+  // 吹氣：比環境噪音高 12dB 以上開始算，高 32dB 算滿
+  const micLv = mic && calib <= 0 ? Math.max(0, Math.min(1, (rawDb - floorDb - 12) / 20)) : 0;
+  const target = Math.max(micLv, fakeBlow ? .85 : 0);
+  level += (target - level) * Math.min(1, dt * 14);
+}
+
+/* 狀態 */
+let best = {}; try { best = JSON.parse(localStorage.getItem('candleBest')) || {}; } catch (e) {}
+let state = 'menu', time = 0, lv = 0, L = LEVELS[0], t = 0, candles = [], lung = 1, smoke = [], confetti = [], name = '', relights = 0;
+function setTip(s) { $('tip').textContent = s; }
+function hud() {
+  $('hLv').textContent = `${lv + 1}/${LEVELS.length}`; $('hTime').textContent = Math.max(0, L.time - t).toFixed(1);
+  $('hCnt').textContent = `${candles.filter(c => !c.lit).length}/${candles.length}`; $('hBest').textContent = best[lv] ? best[lv].toFixed(1) + 's' : '—';
+}
+function setup(i) {
+  lv = i; L = LEVELS[i]; t = 0; lung = 1; smoke = []; confetti = []; relights = 0;
+  candles = [];
+  const n = L.n, cols = ['#f472b6', '#60a5fa', '#facc15', '#4ade80', '#fb923c', '#a78bfa'];
+  const idxs = [...Array(n).keys()].sort(() => Math.random() - .5);
+  const hard = new Set(idxs.slice(0, L.hard)), trick = new Set(idxs.slice(L.hard, L.hard + L.trick));
+  for (let k = 0; k < n; k++) {
+    const row = n > 6 && k % 2 ? 1 : 0, perRow = n > 6 ? Math.ceil(n / 2) : n, col = n > 6 ? Math.floor(k / 2) : k;
+    const x = 200 + (col - (perRow - 1) / 2) * Math.min(52, 300 / perRow) + (row ? 14 : 0), y = 300 - row * 18;
+    candles.push({ x, y, lit: true, hp: 1, hard: hard.has(k), trick: trick.has(k), relight: 0, col: trick.has(k) ? '#7c3aed' : cols[k % cols.length], h: 62 + Math.random() * 14, ph: Math.random() * 6 });
+  }
+  state = 'play'; $('menu').hidden = true; $('over').hidden = true;
+  setTip(L.trick ? '紫色惡作劇蠟燭會自己再點燃，要最後一起吹熄！' : '對著麥克風吹氣！'); hud();
+}
+$('start').onclick = async () => {
+  initAudio(); name = $('name').value.trim();
+  const ok = await initMic();
+  calib = 1; calibSum = 0; calibN = 0;
+  setTip(ok ? '先安靜 1 秒，測量環境噪音…' : '沒有麥克風權限：按住下方按鈕模擬吹氣');
+  setup(0); if (ok) { state = 'calib'; setTimeout(() => { state = 'play'; setTip('開始吹！'); }, 1100); }
+};
+$('oNext').onclick = () => { initAudio(); setup(Math.min(LEVELS.length - 1, lv + 1)); };
+$('oAgain').onclick = () => { initAudio(); setup(lv); };
+const bb = $('blowBtn');
+bb.addEventListener('pointerdown', e => { e.preventDefault(); initAudio(); fakeBlow = true; bb.classList.add('on'); });
+const unb = () => { fakeBlow = false; bb.classList.remove('on'); };
+bb.addEventListener('pointerup', unb); bb.addEventListener('pointercancel', unb); bb.addEventListener('pointerleave', unb);
+addEventListener('keydown', e => { if (e.code === 'Space') { fakeBlow = true; initAudio(); } }); addEventListener('keyup', e => { if (e.code === 'Space') fakeBlow = false; });
+
+/* 更新 */
+function update(dt) {
+  time += dt; readMic(dt);
+  smoke.forEach(s => { s.t -= dt; s.y -= 30 * dt; s.x += (Math.sin(time * 2 + s.p) * 10 + 8) * dt; s.r += 8 * dt; }); smoke = smoke.filter(s => s.t > 0);
+  confetti.forEach(c => { c.t -= dt; c.x += c.vx * dt; c.y += c.vy * dt; c.vy += 200 * dt; c.r += c.vr * dt; }); confetti = confetti.filter(c => c.t > 0);
+  if (state !== 'play') return;
+  t += dt;
+  // 肺活量：吹氣時消耗，停下來恢復
+  const blowing = level > .08;
+  const eff = lung > 0 ? level : level * .15;
+  if (blowing) lung = Math.max(0, lung - dt * (.16 + level * .16)); else lung = Math.min(1, lung + dt * .45);
+  for (const c of candles) {
+    if (c.lit) {
+      const res = c.hard ? .55 : 1;
+      // 氣流會左右飄，靠近氣流中心的蠟燭比較容易熄
+      const fx = 200 + Math.sin(t * 1.25) * 150, near = .25 + .75 * Math.exp(-Math.pow((fx - c.x) / 85, 2)) * (c.y < 300 ? .85 : 1);
+      if (eff > .25) c.hp -= (eff - .2) * dt * 1.8 * res * near; else c.hp = Math.min(1, c.hp + dt * .12);
+      if (c.hp <= 0) { c.lit = false; c.hp = 0; sOut(); vib(15); for (let i = 0; i < 6; i++) smoke.push({ x: c.x, y: c.y - c.h - 4, r: 3 + i, t: 1.6 + i * .2, p: Math.random() * 6 }); if (c.trick) c.relight = 1.6 + Math.random() * .6; }
+    } else if (c.trick && c.relight > 0) {
+      c.relight -= dt;
+      if (c.relight <= 0) { if (candles.some(o => o.lit && o !== c)) { c.lit = true; c.hp = .7; relights++; sRelight(); setTip('😈 惡作劇蠟燭又點燃了！'); } }
+    }
+  }
+  if (candles.every(c => !c.lit)) win();
+  else if (t >= L.time) lose();
+  hud();
+}
+function win() {
+  state = 'over'; playBirthday(); vib([40, 40, 80]);
+  for (let i = 0; i < 120; i++) confetti.push({ x: 200 + (Math.random() - .5) * 100, y: 160, vx: (Math.random() - .5) * 420, vy: -Math.random() * 380 - 60, t: 3.5, c: `hsl(${Math.random() * 360},90%,65%)`, r: Math.random() * 6, vr: (Math.random() - .5) * 10 });
+  const nb = !best[lv] || t < best[lv]; if (nb) { best[lv] = t; try { localStorage.setItem('candleBest', JSON.stringify(best)); } catch (e) {} }
+  setTip(name ? `🎉 ${name} 生日快樂！` : '🎉 生日快樂！');
+  setTimeout(() => {
+    $('oTitle').textContent = lv === LEVELS.length - 1 ? '🏆 全部吹熄了！' : '🎉 全部吹熄！';
+    $('oStats').innerHTML = `<div>用時<b>${t.toFixed(1)} 秒${nb ? ' 🆕' : ''}</b></div><div>蠟燭<b>${candles.length} 根</b></div><div>惡作劇復燃<b>${relights} 次</b></div><div>關卡<b>${lv + 1}/${LEVELS.length}</b></div>`;
+    $('oNext').hidden = lv === LEVELS.length - 1; $('over').hidden = false;
+  }, 2600);
+  hud();
+}
+function lose() {
+  state = 'over'; tone(300, .5, 'sawtooth', .05, 150);
+  $('oTitle').textContent = '⏰ 時間到！';
+  $('oStats').innerHTML = `<div>還亮著<b>${candles.filter(c => c.lit).length} 根</b></div><div>關卡<b>${lv + 1}/${LEVELS.length}</b></div>`;
+  $('oNext').hidden = true; $('over').hidden = false;
+}
+
+/* 繪圖 */
+function drawCake() {
+  // 桌子
+  ctx.fillStyle = '#4a2c1a'; ctx.fillRect(0, 430, W, H - 430);
+  ctx.fillStyle = 'rgba(255,255,255,.06)'; for (let x = 0; x < W; x += 40) ctx.fillRect(x, 430, 2, H - 430);
+  // 盤子
+  ctx.fillStyle = '#e5e7eb'; ctx.beginPath(); ctx.ellipse(200, 440, 170, 30, 0, 0, 7); ctx.fill();
+  ctx.fillStyle = '#f9fafb'; ctx.beginPath(); ctx.ellipse(200, 436, 160, 25, 0, 0, 7); ctx.fill();
+  // 下層
+  const g1 = ctx.createLinearGradient(50, 0, 350, 0); g1.addColorStop(0, '#d97706'); g1.addColorStop(.5, '#fbbf24'); g1.addColorStop(1, '#b45309');
+  ctx.fillStyle = g1; ctx.fillRect(50, 340, 300, 95); ctx.beginPath(); ctx.ellipse(200, 435, 150, 22, 0, 0, Math.PI); ctx.fill();
+  ctx.fillStyle = '#fdf2f8'; ctx.beginPath(); ctx.ellipse(200, 340, 150, 26, 0, 0, 7); ctx.fill();
+  // 奶油滴
+  ctx.fillStyle = '#fdf2f8'; for (let i = 0; i < 12; i++) { const x = 60 + i * 25; ctx.beginPath(); ctx.ellipse(x, 352 + (i % 3) * 4, 9, 14 + (i % 3) * 5, 0, 0, 7); ctx.fill(); }
+  ctx.fillStyle = '#f472b6'; ctx.fillRect(50, 395, 300, 10);
+  for (let i = 0; i < 10; i++) { ctx.fillStyle = ['#ef4444', '#facc15', '#22c55e', '#3b82f6'][i % 4]; ctx.beginPath(); ctx.arc(70 + i * 29, 380, 4, 0, 7); ctx.fill(); }
+  // 上層
+  const g2 = ctx.createLinearGradient(90, 0, 310, 0); g2.addColorStop(0, '#be185d'); g2.addColorStop(.5, '#f472b6'); g2.addColorStop(1, '#9d174d');
+  ctx.fillStyle = g2; ctx.fillRect(90, 290, 220, 52); ctx.beginPath(); ctx.ellipse(200, 342, 110, 18, 0, 0, Math.PI); ctx.fill();
+  ctx.fillStyle = '#fff1f2'; ctx.beginPath(); ctx.ellipse(200, 290, 110, 19, 0, 0, 7); ctx.fill();
+  ctx.fillStyle = '#fff1f2'; for (let i = 0; i < 9; i++) { const x = 98 + i * 26; ctx.beginPath(); ctx.ellipse(x, 300 + (i % 2) * 4, 8, 11 + (i % 2) * 4, 0, 0, 7); ctx.fill(); }
+  // 草莓
+  for (const x of [110, 290]) { ctx.font = '20px system-ui'; ctx.textAlign = 'center'; ctx.fillStyle = '#000'; ctx.fillText('🍓', x, 296); }
+  // 名字
+  const txt = name ? `${name} 生日快樂` : 'Happy Birthday';
+  ctx.font = `900 ${txt.length > 10 ? 17 : 21}px system-ui`; ctx.textAlign = 'center'; ctx.fillStyle = '#7c2d12'; ctx.fillText(txt, 200, 422);
+}
+function drawCandle(c) {
+  const top = c.y - c.h;
+  // 蠟燭本體
+  const g = ctx.createLinearGradient(c.x - 7, 0, c.x + 7, 0); g.addColorStop(0, shade(c.col, .7)); g.addColorStop(.4, c.col); g.addColorStop(1, shade(c.col, .55));
+  ctx.fillStyle = g; ctx.fillRect(c.x - 6, top, 12, c.h);
+  ctx.strokeStyle = 'rgba(255,255,255,.55)'; ctx.lineWidth = 2; for (let y = top + 6; y < c.y; y += 12) { ctx.beginPath(); ctx.moveTo(c.x - 6, y); ctx.lineTo(c.x + 6, y + 6); ctx.stroke(); }
+  if (c.hard) { ctx.fillStyle = '#facc15'; ctx.fillRect(c.x - 6, top, 12, 5); }
+  if (c.trick) { ctx.font = '11px system-ui'; ctx.textAlign = 'center'; ctx.fillStyle = '#000'; ctx.fillText('😈', c.x, c.y - 8); }
+  ctx.fillStyle = 'rgba(255,255,255,.5)'; ctx.beginPath(); ctx.ellipse(c.x, top, 6, 2, 0, 0, 7); ctx.fill();
+  ctx.strokeStyle = '#1f2937'; ctx.lineWidth = 2; ctx.beginPath(); ctx.moveTo(c.x, top); ctx.lineTo(c.x, top - 7); ctx.stroke();
+  if (!c.lit) { if (c.trick && c.relight > 0) { ctx.fillStyle = `rgba(239,68,68,${.5 + .5 * Math.sin(time * 20)})`; ctx.beginPath(); ctx.arc(c.x, top - 8, 2.5, 0, 7); ctx.fill(); } return; }
+  // 火焰：吹得越用力越歪、越小
+  const lean = level * 1.1 + Math.sin(time * 9 + c.ph) * .06, sz = (.55 + .45 * c.hp) * (1 - level * .25), fh = 26 * sz, fw = 8 * sz;
+  ctx.save(); ctx.translate(c.x, top - 7); ctx.rotate(lean);
+  const glow = ctx.createRadialGradient(0, -fh * .45, 2, 0, -fh * .45, 40 * sz); glow.addColorStop(0, 'rgba(253,224,71,.45)'); glow.addColorStop(1, 'rgba(253,224,71,0)');
+  ctx.fillStyle = glow; ctx.beginPath(); ctx.arc(0, -fh * .45, 40 * sz, 0, 7); ctx.fill();
+  const fl = Math.sin(time * 25 + c.ph) * 1.5;
+  const fg = ctx.createRadialGradient(0, -fh * .3, 1, 0, -fh * .4, fh); fg.addColorStop(0, '#fffbe6'); fg.addColorStop(.35, '#fde047'); fg.addColorStop(.75, '#f97316'); fg.addColorStop(1, 'rgba(239,68,68,.2)');
+  ctx.fillStyle = fg; ctx.beginPath(); ctx.moveTo(0, 0); ctx.bezierCurveTo(-fw, -fh * .2, -fw * .7 + fl, -fh * .7, fl, -fh); ctx.bezierCurveTo(fw * .7 + fl, -fh * .7, fw, -fh * .2, 0, 0); ctx.fill();
+  ctx.fillStyle = 'rgba(59,130,246,.55)'; ctx.beginPath(); ctx.ellipse(0, -3, fw * .35, fh * .14, 0, 0, 7); ctx.fill();
+  ctx.restore();
+}
+function shade(hex, k) { const n = parseInt(hex.slice(1), 16); return `rgb(${(n >> 16) * k | 0},${(n >> 8 & 255) * k | 0},${(n & 255) * k | 0})`; }
+function draw() {
+  ctx.setTransform(scale, 0, 0, scale, 0, 0);
+  const lit = candles.filter(c => c.lit).length, glowK = candles.length ? lit / candles.length : 1;
+  const bg = ctx.createRadialGradient(200, 260, 30, 200, 260, 420); bg.addColorStop(0, `rgba(${80 + 70 * glowK},${40 + 40 * glowK},${30},1)`); bg.addColorStop(1, '#0d0714');
+  ctx.fillStyle = bg; ctx.fillRect(0, 0, W, H);
+  // 彩旗
+  for (let i = 0; i < 9; i++) { const x = 20 + i * 45; ctx.fillStyle = ['#f472b6', '#facc15', '#60a5fa', '#4ade80'][i % 4]; ctx.beginPath(); ctx.moveTo(x, 30 + Math.sin(i) * 4); ctx.lineTo(x + 30, 30 + Math.sin(i + 1) * 4); ctx.lineTo(x + 15, 60); ctx.fill(); }
+  ctx.strokeStyle = '#fff6'; ctx.lineWidth = 1.5; ctx.beginPath(); ctx.moveTo(0, 28); ctx.quadraticCurveTo(200, 40, W, 28); ctx.stroke();
+  drawCake();
+  candles.slice().sort((a, b) => a.y - b.y).forEach(drawCandle);
+  if (state === 'play' && level > .25) { const fx = 200 + Math.sin(t * 1.25) * 150; for (let i = 0; i < 5; i++) { const yy = 150 + i * 22, xx = fx + Math.sin(time * 12 + i) * 6; ctx.strokeStyle = `rgba(186,230,253,${.18 + level * .25})`; ctx.lineWidth = 2; ctx.beginPath(); ctx.moveTo(xx - 26, yy); ctx.quadraticCurveTo(xx, yy - 8, xx + 26, yy); ctx.stroke(); } }
+  for (const s of smoke) { ctx.fillStyle = `rgba(200,200,210,${Math.min(.35, s.t * .2)})`; ctx.beginPath(); ctx.arc(s.x, s.y, s.r, 0, 7); ctx.fill(); }
+  for (const c of confetti) { ctx.save(); ctx.translate(c.x, c.y); ctx.rotate(c.r); ctx.fillStyle = c.c; ctx.fillRect(-3, -5, 6, 10); ctx.restore(); }
+  // 吹氣與肺活量
+  ctx.fillStyle = 'rgba(0,0,0,.45)'; ctx.fillRect(14, 120, 16, 160); ctx.fillRect(W - 30, 120, 16, 160);
+  const lc = level > .25 ? '#22d3ee' : '#64748b'; ctx.fillStyle = lc; ctx.fillRect(14, 280 - 160 * level, 16, 160 * level);
+  ctx.fillStyle = lung > .25 ? '#f472b6' : '#ef4444'; ctx.fillRect(W - 30, 280 - 160 * lung, 16, 160 * lung);
+  ctx.strokeStyle = '#fff3'; ctx.strokeRect(14, 120, 16, 160); ctx.strokeRect(W - 30, 120, 16, 160);
+  ctx.fillStyle = '#fff'; ctx.font = '700 10px system-ui'; ctx.textAlign = 'center'; ctx.fillText('吹氣', 22, 112); ctx.fillText('肺活量', W - 22, 112);
+  ctx.strokeStyle = '#fde047'; ctx.setLineDash([3, 3]); ctx.beginPath(); ctx.moveTo(10, 280 - 160 * .25); ctx.lineTo(34, 280 - 160 * .25); ctx.stroke(); ctx.setLineDash([]);
+  if (state === 'calib') { ctx.fillStyle = 'rgba(0,0,0,.5)'; ctx.fillRect(60, 180, 280, 60); ctx.fillStyle = '#fff'; ctx.font = '900 18px system-ui'; ctx.fillText('🤫 安靜一下，測量環境噪音…', 200, 216); }
+  if (state === 'play' && lung < .2) { ctx.fillStyle = '#fca5a5'; ctx.font = '900 16px system-ui'; ctx.fillText('沒氣了！停一下換氣', 200, 100); }
+}
+
+let last = performance.now(), fast = 1;
+function loop(now) { const dt = Math.min(.033, (now - last) / 1000); last = now; for (let i = 0; i < fast; i++) update(dt); draw(); requestAnimationFrame(loop); }
+resize(); requestAnimationFrame(loop);
+window.__cd = { get state() { return state; }, get candles() { return candles; }, get level() { return level; }, get lung() { return lung; }, setup, setBlow: v => { fakeBlow = v; }, set fast(f) { fast = f; }, setName: n => { name = n; } };
+})();
+</script>
+</body>
+</html>
