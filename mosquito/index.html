@@ -33,7 +33,7 @@
   <canvas id="c"></canvas>
   <div class="ov" id="menu"><div class="box">
     <h2>🦟 打蚊子</h2>
-    <p>半夜被蚊子吵醒了！<br>看到蚊子就<b>點下去拍死牠</b>，60 秒內打越多越好。<br>蚊子停在手臂上太久會叮你，<b>被叮 5 包就輸了</b>。<br>🐯 虎斑蚊要拍 2 下・👑 金色蚊子王加大分</p>
+    <p>半夜被蚊子吵醒了！<br>看到蚊子就<b>點下去拍死牠</b>，60 秒內打越多越好。<br>蚊子停在大腿上太久會叮你，<b>被叮 5 包就輸了</b>。<br>🐯 虎斑蚊要拍 2 下・👑 金色蚊子王加大分</p>
     <button class="go" id="start">開燈，開打！</button>
   </div></div>
   <div class="ov" id="over" hidden><div class="box">
@@ -85,8 +85,15 @@ function ding(f, d = .12) { if (!ac) return; const t = ac.currentTime, o = ac.cr
 
 /* 場景 */
 const WIN = { x: 250, y: 40, w: 120, h: 130 };
-const ARM_Y = 590;
-const armTop = x => ARM_Y - 22 + Math.sin(x / 60) * 4;   // 手臂上緣
+const ARM_Y = 560;   // 腿部中線
+const LEG_X0 = 124, LEG_X1 = 392;   // 蚊子可停的腿部範圍
+const kneeBump = x => x > 258 && x < 292 ? 3.5 * Math.sin((x - 258) / 34 * Math.PI) : 0;
+const armTop = x => (x < 270 ? 512 + (x - 100) / 170 * 36 - 6 * Math.sin(Math.max(0, x - 100) / 170 * Math.PI) : 548 + (x - 270) * .12) - kneeBump(x);   // 上側腿上緣
+const legBot = x => x < 262 ? 606 - (x - 100) / 162 * 14 + 5 * Math.sin(Math.max(0, x - 100) / 162 * Math.PI)
+  : x < 285 ? 592 + (x - 262) * .04 - 1.5 * Math.sin((x - 262) / 23 * Math.PI)
+  : 593 - (x - 285) * .08 + 10 * (Math.exp(-(((x - 322) / 30) ** 2)) - Math.exp(-((37 / 30) ** 2)) * Math.max(0, 1 - (x - 285) / 20));
+const lowTop = x => 586 + (x - 100) * .06 - 3 * Math.sin(Math.min(1, Math.max(0, (x - 100) / 180)) * Math.PI);
+const lowBot = x => x < 285 ? 644 - (x - 100) * .04 : 636.6 - (x - 285) * .08 + 5 * (Math.exp(-(((x - 330) / 28) ** 2)) - .075 * Math.max(0, 1 - (x - 285) / 20));
 const bg = document.createElement('canvas'); bg.width = W * 2; bg.height = H * 2;
 (() => {
   const g = bg.getContext('2d'); g.scale(2, 2);
@@ -117,21 +124,132 @@ const bg = document.createElement('canvas'); bg.width = W * 2; bg.height = H * 2
   g.fillStyle = '#fff3b0'; g.beginPath(); g.ellipse(70, 100, 30, 5, 0, 0, Math.PI * 2); g.fill();
   g.strokeStyle = '#555'; g.lineWidth = 4; g.beginPath(); g.moveTo(70, 60); g.lineTo(70, 30); g.stroke();
   // 床單
-  const bed = g.createLinearGradient(0, 520, 0, H); bed.addColorStop(0, '#a8dadc'); bed.addColorStop(1, '#7fb7c0');
-  g.fillStyle = bed; g.fillRect(0, 520, W, H - 520);
-  for (let i = 0; i < 9; i++) { g.strokeStyle = 'rgba(255,255,255,.35)'; g.lineWidth = 2; g.beginPath(); g.moveTo(i * 50, 520); g.quadraticCurveTo(i * 50 + 30, 590, i * 50 - 10, H); g.stroke(); }
-  // 手臂
-  const skin = g.createLinearGradient(0, ARM_Y - 26, 0, ARM_Y + 34); skin.addColorStop(0, '#f6c9a0'); skin.addColorStop(1, '#d99a6c');
-  g.fillStyle = skin;
-  g.beginPath(); g.moveTo(-10, armTop(-10));
-  for (let x = -10; x <= 300; x += 10) g.lineTo(x, armTop(x));
-  g.quadraticCurveTo(340, ARM_Y - 34, 365, ARM_Y - 18);   // 手背
-  g.quadraticCurveTo(395, ARM_Y - 6, 380, ARM_Y + 8);
-  g.quadraticCurveTo(350, ARM_Y + 30, 300, ARM_Y + 30);
-  g.lineTo(-10, ARM_Y + 34); g.closePath(); g.fill();
-  g.strokeStyle = 'rgba(150,90,50,.35)'; g.lineWidth = 1.5;
-  for (const x of [355, 368, 378]) { g.beginPath(); g.moveTo(x - 12, ARM_Y - 8); g.lineTo(x + 4, ARM_Y + 6); g.stroke(); }
-  for (let i = 0; i < 40; i++) { g.strokeStyle = 'rgba(120,80,50,.25)'; g.lineWidth = .7; const x = Math.random() * 290, y = armTop(x) + 3 + Math.random() * 20; g.beginPath(); g.moveTo(x, y); g.lineTo(x + 3, y - 2); g.stroke(); }
+  const bed = g.createLinearGradient(0, 490, 0, H); bed.addColorStop(0, '#a8dadc'); bed.addColorStop(1, '#7fb7c0');
+  g.fillStyle = bed; g.fillRect(0, 490, W, H - 490);
+  for (let i = 0; i < 9; i++) { g.strokeStyle = 'rgba(255,255,255,.35)'; g.lineWidth = 2; g.beginPath(); g.moveTo(i * 50, 490); g.quadraticCurveTo(i * 50 + 30, 580, i * 50 - 10, H); g.stroke(); }
+  g.fillStyle = 'rgba(40,80,90,.18)'; g.fillRect(0, 490, W, 3);
+  // ===== 側躺的雙腿（只露腰部以下） =====
+  const rnd = (a, b) => a + Math.random() * (b - a);
+  const OUT = 'rgba(115,62,36,.6)';
+  const soft = (fn, col, blur, oy) => { g.save(); g.shadowColor = col; g.shadowBlur = blur; g.shadowOffsetY = oy; fn(); g.restore(); };
+  const shape = (top, bot, x0, x1) => { const p = new Path2D(); p.moveTo(x0, top(x0));
+    for (let x = x0; x <= x1; x += 2) p.lineTo(x, top(x)); for (let x = x1; x >= x0; x -= 2) p.lineTo(x, bot(x)); p.closePath(); return p; };
+  // 逐欄圓柱漸層：每一欄依該處上下緣算光影，腿才會有真實的圓柱體積
+  const cyl = (top, bot, x0, x1, stops) => { for (let x = x0; x <= x1; x++) { const t = top(x), b = bot(x), k = g.createLinearGradient(0, t, 0, b);
+    for (const [o, c] of stops) k.addColorStop(o, c); g.fillStyle = k; g.fillRect(x, t - 1, 1.2, b - t + 2); } };
+  const SKIN = [[0, '#e3ab84'], [.08, '#f8dcc0'], [.2, '#f6d3b2'], [.45, '#ecbb93'], [.72, '#d39670'], [.9, '#b77653'], [1, '#a9705a']];
+  const SKIN_LOW = [[0, '#8e573d'], [.18, '#c7895f'], [.38, '#dfa982'], [.55, '#e3b089'], [.8, '#c48462'], [.94, '#a76a4c'], [1, '#9a6a58']];
+  const hairs = (top, bot, x0, x1, n, a0, a1) => { for (let i = 0; i < n; i++) { const x = rnd(x0, x1), y = rnd(top(x) + 2, bot(x) - 2), l = rnd(2.5, 5);
+    g.beginPath(); g.moveTo(x, y); g.quadraticCurveTo(x + l * .6, y + .3, x + l, y + rnd(.2, 1.4));
+    g.strokeStyle = `rgba(85,52,32,${rnd(a0, a1).toFixed(2)})`; g.lineWidth = rnd(.35, .55); g.stroke(); } };
+  const pores = (top, bot, x0, x1) => { for (let i = 0; i < 500; i++) { const x = rnd(x0, x1), y = rnd(top(x), bot(x));
+    g.fillStyle = Math.random() < .5 ? 'rgba(120,65,40,.07)' : 'rgba(255,240,225,.08)'; g.fillRect(x, y, .7, .7); } };
+
+  // —— 下側那條腿 ——
+  // 床單被壓出的接觸陰影
+  const cs = g.createLinearGradient(0, 632, 0, 652); cs.addColorStop(0, 'rgba(30,70,80,.35)'); cs.addColorStop(1, 'rgba(30,70,80,0)');
+  g.fillStyle = cs; g.beginPath(); g.moveTo(60, 636); g.quadraticCurveTo(250, 628, 410, 618); g.lineTo(410, 640); g.quadraticCurveTo(250, 656, 60, 656); g.fill();
+  const low = shape(lowTop, lowBot, 60, 408);
+  soft(() => { g.fillStyle = '#c08560'; g.fill(low); }, 'rgba(25,55,65,.5)', 14, 6);
+  g.save(); g.clip(low);
+  cyl(lowTop, lowBot, 60, 408, SKIN_LOW);
+  // 大腿內側肌肉、被床壓扁的下緣
+  const lm = g.createRadialGradient(190, 618, 4, 190, 618, 70); lm.addColorStop(0, 'rgba(255,228,205,.22)'); lm.addColorStop(1, 'rgba(255,228,205,0)');
+  g.fillStyle = lm; g.fillRect(110, 590, 170, 56);
+  const lf = g.createLinearGradient(0, 632, 0, 646); lf.addColorStop(0, 'rgba(90,45,30,0)'); lf.addColorStop(1, 'rgba(90,45,30,.25)');
+  g.fillStyle = lf; g.fillRect(60, 628, 350, 20);
+  const lred = g.createRadialGradient(292, 616, 2, 292, 616, 22); lred.addColorStop(0, 'rgba(220,115,95,.14)'); lred.addColorStop(1, 'rgba(220,115,95,0)');
+  g.fillStyle = lred; g.fillRect(266, 594, 54, 46);
+  g.beginPath(); g.moveTo(300, 606); g.lineTo(406, 616); g.strokeStyle = 'rgba(255,235,215,.12)'; g.lineWidth = 4; g.stroke();
+  g.strokeStyle = 'rgba(95,115,165,.07)'; g.lineWidth = 2.6; g.beginPath(); g.moveTo(310, 624); g.bezierCurveTo(340, 618, 370, 626, 406, 620); g.stroke();
+  for (let i = 0; i < 8; i++) { const x = rnd(130, 400), y = rnd(lowTop(x) + 8, lowBot(x) - 4);
+    g.beginPath(); g.arc(x, y, rnd(.5, 1), 0, Math.PI * 2); g.fillStyle = 'rgba(120,65,42,.2)'; g.fill(); }
+  const lk = g.createRadialGradient(290, 622, 2, 290, 622, 20); lk.addColorStop(0, 'rgba(100,52,35,.35)'); lk.addColorStop(1, 'rgba(100,52,35,0)');
+  g.fillStyle = lk; g.fillRect(260, 596, 60, 50);
+  g.strokeStyle = 'rgba(100,52,35,.4)'; g.lineWidth = .9; g.beginPath(); g.moveTo(286, 610); g.quadraticCurveTo(294, 622, 290, 634); g.stroke();
+  const lc = g.createRadialGradient(334, 625, 2, 334, 625, 26); lc.addColorStop(0, 'rgba(255,225,200,.22)'); lc.addColorStop(1, 'rgba(255,225,200,0)');
+  g.fillStyle = lc; g.fillRect(300, 600, 70, 45);
+  const lr = g.createLinearGradient(0, 628, 0, 642); lr.addColorStop(0, 'rgba(150,210,215,0)'); lr.addColorStop(1, 'rgba(150,210,215,.35)');
+  g.fillStyle = lr; g.fillRect(96, 625, 320, 20);
+  const ls = g.createLinearGradient(116, 0, 150, 0); ls.addColorStop(0, 'rgba(60,32,22,.45)'); ls.addColorStop(1, 'rgba(60,32,22,0)'); g.fillStyle = ls; g.fillRect(100, 590, 52, 60);
+  pores(lowTop, lowBot, 60, 408); hairs(lowTop, lowBot, 130, 250, 40, .06, .14); hairs(lowTop, lowBot, 290, 405, 80, .12, .28);
+  g.restore();
+  g.strokeStyle = OUT; g.lineWidth = 1; g.stroke(low);
+
+  // —— 上側那條腿（大腿、膝蓋、小腿） ——
+  const leg = shape(armTop, legBot, 96, 408);
+  soft(() => { g.fillStyle = '#d9a17a'; g.fill(leg); }, 'rgba(60,30,20,.55)', 12, 7);   // 投影到下側腿上
+  g.save(); g.clip(leg);
+  cyl(armTop, legBot, 96, 408, SKIN);
+  // 大腿外側髂脛束凹線
+  g.lineCap = 'round';
+  g.beginPath(); g.moveTo(118, 556); g.bezierCurveTo(170, 560, 220, 566, 262, 570); g.strokeStyle = 'rgba(160,90,58,.06)'; g.lineWidth = 14; g.stroke();
+  g.beginPath(); g.moveTo(118, 548); g.bezierCurveTo(170, 552, 220, 558, 262, 562); g.strokeStyle = 'rgba(255,238,220,.08)'; g.lineWidth = 8; g.stroke();
+  // 大腿下緣（腿後肌）鼓起的亮面
+  const hm = g.createRadialGradient(185, 590, 4, 185, 590, 60); hm.addColorStop(0, 'rgba(255,230,205,.18)'); hm.addColorStop(1, 'rgba(255,230,205,0)');
+  g.fillStyle = hm; g.fillRect(120, 560, 140, 50);
+  // 膝蓋：髕骨亮點、膝窩陰影、皺紋、微紅
+  const pt = g.createRadialGradient(276, 556, 1, 276, 556, 13); pt.addColorStop(0, 'rgba(255,245,232,.5)'); pt.addColorStop(1, 'rgba(255,245,232,0)');
+  g.fillStyle = pt; g.fillRect(258, 540, 36, 32);
+  const kr = g.createRadialGradient(276, 566, 2, 276, 566, 22); kr.addColorStop(0, 'rgba(225,120,100,.16)'); kr.addColorStop(1, 'rgba(225,120,100,0)');
+  g.fillStyle = kr; g.fillRect(250, 540, 52, 56);
+  const kp = g.createRadialGradient(272, 588, 2, 272, 588, 18); kp.addColorStop(0, 'rgba(110,55,35,.38)'); kp.addColorStop(1, 'rgba(110,55,35,0)');
+  g.fillStyle = kp; g.fillRect(250, 570, 46, 30);
+  g.strokeStyle = 'rgba(115,60,38,.45)'; g.lineWidth = .9;
+  g.beginPath(); g.moveTo(266, 576); g.quadraticCurveTo(274, 584, 270, 594); g.stroke();
+  g.strokeStyle = 'rgba(115,60,38,.25)';
+  g.beginPath(); g.moveTo(276, 578); g.quadraticCurveTo(282, 586, 279, 594); g.stroke();
+  // 脛骨稜線、小腿肚
+  g.beginPath(); g.moveTo(292, 556); g.lineTo(406, 571); g.strokeStyle = 'rgba(255,240,226,.14)'; g.lineWidth = 5; g.stroke();
+  const cf = g.createRadialGradient(322, 588, 3, 322, 588, 32); cf.addColorStop(0, 'rgba(255,232,210,.25)'); cf.addColorStop(1, 'rgba(255,232,210,0)');
+  g.fillStyle = cf; g.fillRect(285, 560, 80, 50);
+  // 床單反光、短褲褲口投影
+  const rf = g.createLinearGradient(0, 586, 0, 610); rf.addColorStop(0, 'rgba(150,210,215,0)'); rf.addColorStop(1, 'rgba(150,210,215,.22)');
+  g.fillStyle = rf; g.fillRect(96, 580, 320, 32);
+  const sh = g.createLinearGradient(104, 0, 140, 0); sh.addColorStop(0, 'rgba(70,38,25,.45)'); sh.addColorStop(1, 'rgba(70,38,25,0)');
+  g.fillStyle = sh; g.fillRect(96, 500, 46, 110);
+  // 淡靜脈、雀斑、毛孔、腿毛（小腿較多）
+  g.strokeStyle = 'rgba(95,115,165,.08)'; g.lineWidth = 3;
+  g.beginPath(); g.moveTo(300, 580); g.bezierCurveTo(330, 574, 360, 582, 406, 576); g.stroke();
+  g.beginPath(); g.moveTo(150, 584); g.bezierCurveTo(190, 578, 220, 586, 255, 580); g.lineWidth = 2.4; g.stroke();
+  for (let i = 0; i < 14; i++) { const x = rnd(120, 400), y = rnd(armTop(x) + 4, legBot(x) - 4);
+    g.beginPath(); g.arc(x, y, rnd(.5, 1.1), 0, Math.PI * 2); g.fillStyle = `rgba(140,78,50,${rnd(.12, .26).toFixed(2)})`; g.fill(); }
+  pores(armTop, legBot, 96, 408);
+  hairs(armTop, legBot, 120, 260, 60, .06, .16);
+  hairs(armTop, legBot, 285, 405, 120, .14, .32);
+  g.restore();
+  g.strokeStyle = OUT; g.lineWidth = 1.1; g.stroke(leg);
+  for (let x = 290; x < 406; x += rnd(2.5, 5)) { const y = armTop(x) + .5;   // 小腿上緣的腿毛剪影
+    g.beginPath(); g.moveTo(x, y); g.quadraticCurveTo(x + 2, y - 1.5, x + 4.5, y - rnd(.8, 2.4)); g.strokeStyle = 'rgba(85,52,32,.35)'; g.lineWidth = .45; g.stroke(); }
+
+  // —— 短褲（髖部，往左延伸出畫面） ——
+  const sp = new Path2D();
+  sp.moveTo(-10, 500); sp.bezierCurveTo(20, 478, 70, 476, 104, 498);
+  sp.quadraticCurveTo(114, 505, 118, 512);           // 褲管上緣
+  sp.quadraticCurveTo(116, 560, 109, 600);           // 上側褲口
+  sp.quadraticCurveTo(116, 604, 122, 610);           // 下側褲管
+  sp.quadraticCurveTo(126, 630, 118, 648);           // 下側褲口
+  sp.quadraticCurveTo(70, 664, -10, 662); sp.closePath();
+  soft(() => { g.fillStyle = '#2f4a6d'; g.fill(sp); }, 'rgba(25,40,55,.5)', 14, 6);
+  const sg = g.createLinearGradient(0, 478, 0, 650); sg.addColorStop(0, '#6283ab'); sg.addColorStop(.25, '#45668f'); sg.addColorStop(.7, '#2c4566'); sg.addColorStop(1, '#1e3048');
+  g.fillStyle = sg; g.fill(sp);
+  g.save(); g.clip(sp);
+  for (let x = -10; x < 130; x += 5) { g.strokeStyle = 'rgba(255,255,255,.05)'; g.lineWidth = 2; g.beginPath(); g.moveTo(x, 470); g.lineTo(x - 18, 660); g.stroke(); }
+  for (const [x0, y0, cx, cy, x1, y1] of [[20, 540, 60, 548, 110, 556], [10, 580, 60, 574, 112, 590], [40, 512, 80, 520, 112, 534], [0, 616, 50, 606, 106, 612]]) {
+    g.beginPath(); g.moveTo(x0, y0); g.quadraticCurveTo(cx, cy, x1, y1); g.strokeStyle = 'rgba(10,20,35,.4)'; g.lineWidth = 3; g.stroke();
+    g.beginPath(); g.moveTo(x0, y0 - 3); g.quadraticCurveTo(cx, cy - 3, x1, y1 - 3); g.strokeStyle = 'rgba(160,190,225,.22)'; g.lineWidth = 2; g.stroke(); }
+  const sr = g.createLinearGradient(80, 0, 120, 0); sr.addColorStop(0, 'rgba(10,20,35,0)'); sr.addColorStop(1, 'rgba(10,20,35,.35)');
+  g.fillStyle = sr; g.fillRect(80, 480, 45, 170);
+  // 兩褲管之間的褶縫
+  g.beginPath(); g.moveTo(20, 612); g.quadraticCurveTo(70, 600, 112, 603); g.strokeStyle = 'rgba(8,15,28,.55)'; g.lineWidth = 2.2; g.stroke();
+  g.beginPath(); g.moveTo(24, 616); g.quadraticCurveTo(72, 605, 114, 607); g.strokeStyle = 'rgba(160,190,225,.18)'; g.lineWidth = 1.5; g.stroke();
+  const sr2 = g.createLinearGradient(95, 0, 126, 0); sr2.addColorStop(0, 'rgba(10,20,35,0)'); sr2.addColorStop(1, 'rgba(10,20,35,.3)');
+  g.fillStyle = sr2; g.fillRect(95, 600, 32, 60);
+  g.restore();
+  g.strokeStyle = 'rgba(15,25,40,.75)'; g.lineWidth = 1.2; g.stroke(sp);
+  g.strokeStyle = 'rgba(200,215,235,.4)'; g.lineWidth = .8; g.setLineDash([2.5, 2]);
+  g.beginPath(); g.moveTo(113, 514); g.quadraticCurveTo(111, 560, 104, 598); g.stroke();
+  g.beginPath(); g.moveTo(117, 612); g.quadraticCurveTo(121, 630, 113, 646); g.stroke(); g.setLineDash([]);
 })();
 
 /* 狀態 */
@@ -183,11 +301,11 @@ function update(dt) {
       // 離開：往窗戶飛
       if (m.state === 'leave') { const dx = WIN.x + WIN.w / 2 - m.x, dy = WIN.y + 50 - m.y, d = Math.hypot(dx, dy); tx += dx / d * sp * 1.2; ty += dy / d * sp * 1.2; }
       // 牆邊轉回
-      if (m.x < 20) tx += 140; if (m.x > W - 20) tx -= 140; if (m.y < 20) ty += 140; if (m.y > ARM_Y + 20) ty -= 200;
+      if (m.x < 20) tx += 140; if (m.x > W - 20) tx -= 140; if (m.y < 20) ty += 140; if (m.y > 600) ty -= 200;
       m.vx += (tx - m.vx) * Math.min(1, dt * 3); m.vy += (ty - m.vy) * Math.min(1, dt * 3);
       m.x += m.vx * dt; m.y += m.vy * dt;
       if (m.state === 'fly' && m.type !== 'king' && m.timer > m.flyFor && !m.full) {
-        m.state = 'land'; const lx = 20 + Math.random() * 300; m.tx = lx; m.ty = armTop(lx) + 4 + Math.random() * 10; m.timer = 0;
+        m.state = 'land'; const lx = LEG_X0 + Math.random() * (LEG_X1 - LEG_X0); m.tx = lx; m.ty = armTop(lx) + 4 + Math.random() * 10; m.timer = 0;
       }
       if (m.type === 'king' && m.age > 6.5) m.state = 'leave';
       if (m.state === 'leave' && m.x > WIN.x && m.x < WIN.x + WIN.w && m.y > WIN.y && m.y < WIN.y + WIN.h && m.age > 2) m.gone = true;
