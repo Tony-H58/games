@@ -22,6 +22,7 @@
   .box{background:#12304df5;border:2px solid #38bdf8;border-radius:16px;padding:18px;width:min(330px,90%);text-align:center;max-height:94%;overflow:auto}
   .box h2{margin:0 0 6px;font-size:26px;color:#fde047}
   .box p{font-size:12.5px;line-height:1.75;margin:6px 0 12px;text-align:left}
+  .modes{display:flex;gap:6px;margin-bottom:4px}.modes button{flex:1;border:2px solid #ffffff22;border-radius:10px;background:#123a5c;color:#fff;font-size:14px;font-weight:800;padding:9px 2px}.modes button.on{border-color:#fde047;background:#0369a1}
   .go{width:100%;background:#0284c7;color:#fff;border:0;border-radius:12px;padding:12px;font-size:16px;font-weight:800;margin-top:6px}
   .go.alt{background:#475569}
   .note{font-size:11px;color:#bae6fd;margin-top:8px;line-height:1.6}
@@ -38,6 +39,7 @@
   <div id="hud">
     <div>回合<b id="hRound">1/5</b></div>
     <div id="hWho">玩家<b id="hPlayer">你</b></div>
+    <div>倒數<b id="hTime">10.0</b></div>
     <div>總分<b id="hScore">0</b></div>
     <div style="text-align:right">最高分<b id="hBest">—</b></div>
   </div>
@@ -50,7 +52,8 @@
       🎯 吹到<b>虛線圈的大小</b>就按「✋ 就這樣！」，越接近分數越高。<br>
       💥 吹過頭會<b>砰！爆掉</b>，這回合 0 分。紅色區就是危險區！<br>
       🩹 有補丁的氣球會<b>漏氣</b>，要邊吹邊抓時機。<br>
-      每局 5 顆氣球，滿分 500。</p>
+      ⏱️ 每顆氣球<b>限時 10 秒</b>，時間到還沒按就是 0 分！<br>每局 5 顆氣球，滿分 500。</p>
+      <div class="modes"><button id="mBlow" class="on">🌬️ 吹氣模式</button><button id="mShout">🗣️ 喊叫模式</button></div>
       <button class="go" id="solo">🎤 一個人玩</button>
       <button class="go" id="duo">👥 兩人輪流比賽</button>
       <div class="note">開始時會先安靜 1 秒測量環境噪音。<br>聲音只在手機上即時分析，不會錄音、不會上傳。<br>沒有麥克風時，可以<b>按住「吹氣」按鈕</b>代替。</div>
@@ -102,6 +105,7 @@ const sGood = s => [523, 659, 784, s >= 90 ? 1047 : null].filter(Boolean).forEac
 const vib = ms => { try { navigator.vibrate && navigator.vibrate(ms); } catch (e) {} };
 
 /* 麥克風（和吹蠟燭同一套） */
+let mode = 'blow'; try { mode = localStorage.getItem('micMode') || 'blow'; } catch (e) {}
 let mic = null, floorDb = -70, level = 0, rawDb = -100, calib = 0, calibSum = 0, calibN = 0, fakeBlow = false;
 async function initMic() {
   if (mic) return true;
@@ -117,7 +121,8 @@ function readMic(dt) {
     rawDb = 10 * Math.log10(s / mic.buf.length + 1e-10);
     if (calib > 0) { calib -= dt; calibSum += rawDb; calibN++; if (calib <= 0) floorDb = calibSum / calibN; }
   }
-  const micLv = mic && calib <= 0 ? Math.max(0, Math.min(1, (rawDb - floorDb - 12) / 20)) : 0;
+  const [off, span] = mode === 'shout' ? [18, 28] : [12, 20];
+  const micLv = mic && calib <= 0 ? Math.max(0, Math.min(1, (rawDb - floorDb - off) / span)) : 0;
   const target = Math.max(micLv, fakeBlow ? .7 : 0);
   level += (target - level) * Math.min(1, dt * 14);
 }
@@ -125,28 +130,31 @@ function readMic(dt) {
 /* 狀態 */
 let best = 0; try { best = +localStorage.getItem('balloonBest') || 0; } catch (e) {}
 let state = 'menu', time = 0, duo = false, round = 0, player = 0, scores = [[], []], size = 0, R = ROUNDS[0], col = COLORS[0], popT = 0, pieces = [], wob = 0, lastScore = null, resultT = 0, patch = false;
-const NAMES = ['玩家 1', '玩家 2'];
+const NAMES = ['玩家 1', '玩家 2'], LIMIT = 10;
+let bt = 0, times = [[], []], shoutRun = 0, shoutMax = 0;
 function setTip(s) { $('tip').textContent = s; }
 const tot = i => scores[i].reduce((a, b) => a + b, 0);
 function hud() {
   $('hRound').textContent = `${Math.min(round + 1, 5)}/5`;
   $('hWho').hidden = !duo; $('hPlayer').textContent = NAMES[player];
-  $('hScore').textContent = tot(player); $('hBest').textContent = best || '—';
+  $('hTime').textContent = Math.max(0, LIMIT - bt).toFixed(1); $('hScore').textContent = tot(player); $('hBest').textContent = best || '—';
   $('stopBtn').disabled = state !== 'play' || size < .08;
 }
 async function start(isDuo) {
-  initAudio(); startHiss(); duo = isDuo; scores = [[], []]; round = 0; player = 0;
+  initAudio(); startHiss(); duo = isDuo; scores = [[], []]; times = [[], []]; shoutMax = 0; round = 0; player = 0;
   const ok = await initMic(); calib = 1; calibSum = 0; calibN = 0;
   $('menu').hidden = true; $('over').hidden = true;
   newBalloon();
   if (ok) { state = 'calib'; setTip('🤫 先安靜 1 秒，測量環境噪音…'); setTimeout(() => { state = 'play'; setTip(turnTip()); hud(); }, 1100); }
   else setTip('沒有麥克風權限：按住「吹氣」按鈕代替');
 }
-function turnTip() { return (duo ? `${NAMES[player]} 的回合：` : '') + `吹到虛線圈的大小${R.leak ? '（這顆會漏氣！）' : ''}`; }
+function turnTip() { return (duo ? `${NAMES[player]} 的回合：` : '') + `${LIMIT} 秒內${mode === 'shout' ? '大聲喊' : '吹'}到虛線圈的大小${R.leak ? '（這顆會漏氣！）' : ''}`; }
 function newBalloon() {
-  R = ROUNDS[round]; col = COLORS[(round * 2 + player) % COLORS.length]; size = .05; popT = 0; pieces = []; lastScore = null; patch = R.leak > 0;
+  timedOut = false; R = ROUNDS[round]; col = COLORS[(round * 2 + player) % COLORS.length]; size = .05; popT = 0; pieces = []; lastScore = null; patch = R.leak > 0; bt = 0; shoutRun = 0;
   state = 'play'; setTip(turnTip()); hud();
 }
+function setMode(m) { mode = m; try { localStorage.setItem('micMode', m); } catch (e) {} $('mBlow').classList.toggle('on', m === 'blow'); $('mShout').classList.toggle('on', m === 'shout'); $('blowBtn').textContent = m === 'shout' ? '🗣️ 按住喊叫' : '🌬️ 按住吹氣'; }
+$('mBlow').onclick = () => setMode('blow'); $('mShout').onclick = () => setMode('shout');
 $('solo').onclick = () => start(false);
 $('duo').onclick = () => start(true);
 $('oAgain').onclick = () => start(duo);
@@ -163,11 +171,16 @@ function lockIn() {
   if (state !== 'play' || size < .08) return;
   const err = Math.abs(size - R.target) / R.target;
   const s = Math.max(0, Math.round(100 - err * 300));
-  scores[player].push(s); lastScore = s; state = 'result'; resultT = 1.8;
+  scores[player].push(s); times[player].push(bt); lastScore = s; state = 'result'; resultT = 1.8;
   sGood(s); vib(30); setTip(s >= 95 ? '🎯 完美！' : s >= 80 ? '👍 很接近！' : s >= 50 ? '還可以' : '差有點多…'); hud();
 }
+function timeout() {
+  state = 'popped'; popT = 1.6; scores[player].push(0); times[player].push(LIMIT); lastScore = 0; timedOut = true;
+  tone(300, .5, 'sawtooth', .06, 150); vib(80); setTip('⏰ 時間到！這顆 0 分'); hud();
+}
+let timedOut = false;
 function pop() {
-  state = 'popped'; popT = 1.6; scores[player].push(0); lastScore = 0; sPop(); vib([80, 40, 120]);
+  state = 'popped'; popT = 1.6; scores[player].push(0); times[player].push(bt); lastScore = 0; sPop(); vib([80, 40, 120]);
   const r = radius(size);
   for (let i = 0; i < 26; i++) { const a = Math.random() * 7, sp = 150 + Math.random() * 350; pieces.push({ x: CX + Math.cos(a) * r * .6, y: centerY(size) + Math.sin(a) * r * .6, vx: Math.cos(a) * sp, vy: Math.sin(a) * sp - 100, r: Math.random() * 6, vr: (Math.random() - .5) * 20, s: 6 + Math.random() * 12, t: 1.5 }); }
   setTip('💥 砰！吹太大了'); hud();
@@ -178,17 +191,21 @@ function next() {
   if (round >= 5) { finish(); return; }
   newBalloon();
 }
+function cell(pl, i) { const v = scores[pl][i]; return v === 0 ? (times[pl][i] >= LIMIT ? '⏰' : '💥') : v; }
 function finish() {
   state = 'over';
   let html = '';
   if (duo) {
     const a = tot(0), b = tot(1);
     $('oTitle').textContent = a > b ? '🏆 玩家 1 贏了！' : b > a ? '🏆 玩家 2 贏了！' : '🤝 平手！';
-    html = `<table><tr><th>回合</th><th>玩家 1</th><th>玩家 2</th></tr>${[0, 1, 2, 3, 4].map(i => `<tr><td>${i + 1}</td><td>${scores[0][i] === 0 ? '💥' : scores[0][i]}</td><td>${scores[1][i] === 0 ? '💥' : scores[1][i]}</td></tr>`).join('')}<tr><th>總分</th><th>${a}</th><th>${b}</th></tr></table>`;
+    const ta = times[0].reduce((x, y) => x + y, 0), tb = times[1].reduce((x, y) => x + y, 0);
+    if (a === b) $('oTitle').textContent = ta < tb ? '🏆 同分！玩家 1 比較快' : tb < ta ? '🏆 同分！玩家 2 比較快' : '🤝 平手！';
+    html = `<table><tr><th>回合</th><th>玩家 1</th><th>玩家 2</th></tr>${[0, 1, 2, 3, 4].map(i => `<tr><td>${i + 1}</td><td>${cell(0, i)}</td><td>${cell(1, i)}</td></tr>`).join('')}<tr><th>總分</th><th>${a}</th><th>${b}</th></tr><tr><th>總用時</th><th>${ta.toFixed(1)}s</th><th>${tb.toFixed(1)}s</th></tr></table>`;
   } else {
     const a = tot(0), nb = a > best; if (nb) { best = a; try { localStorage.setItem('balloonBest', best); } catch (e) {} }
     $('oTitle').textContent = a >= 450 ? '🏆 氣球大師！' : a >= 350 ? '🎈 吹得很好！' : a >= 200 ? '👍 不錯喔' : '🙂 再練練';
-    html = `<div class="stats"><div>總分<b>${a} / 500${nb ? ' 🆕' : ''}</b></div><div>最高分<b>${best}</b></div></div><div style="font-size:13px">每顆：${scores[0].map(s => s === 0 ? '💥' : s).join('、')}</div>`;
+    const ta = times[0].reduce((x, y) => x + y, 0);
+    html = `<div class="stats"><div>總分<b>${a} / 500${nb ? ' 🆕' : ''}</b></div><div>總用時<b>${ta.toFixed(1)} 秒</b></div><div>最高分<b>${best}</b></div>${mode === 'shout' ? `<div>最長連續喊叫<b>${shoutMax.toFixed(1)} 秒</b></div>` : ''}</div><table><tr><th>氣球</th><th>分數</th><th>用時</th></tr>${[0, 1, 2, 3, 4].map(i => `<tr><td>${i + 1}</td><td>${cell(0, i)}</td><td>${times[0][i].toFixed(1)}s</td></tr>`).join('')}</table>`;
   }
   $('oBody').innerHTML = html; $('over').hidden = false; hud();
 }
@@ -202,8 +219,11 @@ function update(dt) {
   wob += dt * (2 + level * 10);
   if (hiss) { hiss.g.gain.value = state === 'play' ? level * .12 : 0; hiss.f.frequency.value = 900 + size * 1500; }
   if (state === 'play') {
+    bt += dt; if (level > .25) { shoutRun += dt; shoutMax = Math.max(shoutMax, shoutRun); } else shoutRun = 0;
+    if (bt >= LIMIT) { timeout(); return; }
     // 吹進去的氣越大越難吹（氣球越大長得越慢）
-    const grow = level > .1 ? level * .2 * (1 - size * .35) : 0;
+    // 聲音越大＝漲得越快（不是線性：大聲喊會明顯比小聲快很多）
+    const grow = level > .1 ? Math.pow(level, 1.5) * .34 * (1 - size * .35) : 0;
     size += grow * dt - (.015 + R.leak) * dt * (level > .1 ? .3 : 1);
     size = Math.max(.04, size);
     if (size >= R.pop) pop();
@@ -231,7 +251,7 @@ function drawBalloon() {
   ctx.strokeStyle = 'rgba(239,68,68,.5)'; ctx.lineWidth = 2; ctx.setLineDash([3, 6]); balloonPath(CX, pcy, pr); ctx.stroke();
   ctx.strokeStyle = 'rgba(253,224,71,.95)'; ctx.lineWidth = 3; ctx.setLineDash([10, 7]); balloonPath(CX, tcy, tr); ctx.stroke(); ctx.setLineDash([]);
   ctx.fillStyle = '#fde047'; ctx.font = '700 12px system-ui'; ctx.textAlign = 'center'; ctx.fillText('目標大小', CX + tr * .78, tcy - tr * .95);
-  if (state === 'popped') return;
+  if (state === 'popped' && !timedOut) return;
   // 氣球本體：越大越薄、顏色越淡、越透光
   const thin = size / R.pop;
   const g = ctx.createRadialGradient(CX + wx - r * .35, cy - r * .45, r * .05, CX + wx, cy, r * 1.15);
@@ -250,7 +270,7 @@ function drawPump() {
   ctx.fillStyle = '#e5e7eb'; ctx.beginPath(); ctx.roundRect(CX - 16, NECK_Y + 8, 32, 22, 6); ctx.fill();
   ctx.fillStyle = '#94a3b8'; ctx.fillRect(CX - 10, NECK_Y + 30, 20, 50);
   ctx.fillStyle = '#64748b'; ctx.beginPath(); ctx.roundRect(CX - 40, NECK_Y + 74, 80, 16, 6); ctx.fill();
-  if (level > .1 && state === 'play') { ctx.strokeStyle = `rgba(186,230,253,${level})`; ctx.lineWidth = 2; for (let i = 0; i < 3; i++) { const y = NECK_Y + 50 - ((time * 120 + i * 20) % 50); ctx.beginPath(); ctx.moveTo(CX - 6, y); ctx.lineTo(CX + 6, y - 6); ctx.stroke(); } }
+  if (level > .1 && state === 'play') { ctx.strokeStyle = `rgba(186,230,253,${level})`; ctx.lineWidth = 1.5 + level * 3; for (let i = 0; i < 2 + Math.round(level * 4); i++) { const y = NECK_Y + 50 - ((time * 120 + i * 20) % 50); ctx.beginPath(); ctx.moveTo(CX - 6, y); ctx.lineTo(CX + 6, y - 6); ctx.stroke(); } }
 }
 function draw() {
   ctx.setTransform(scale, 0, 0, scale, 0, 0);
@@ -259,13 +279,20 @@ function draw() {
   for (let i = 0; i < 30; i++) { ctx.fillStyle = `rgba(255,255,255,${.2 + .2 * Math.sin(time * 2 + i)})`; ctx.fillRect((i * 97) % W, (i * 53) % 240, 2, 2); }
   if (state !== 'menu') { drawBalloon(); drawPump(); }
   for (const p of pieces) { ctx.save(); ctx.translate(p.x, p.y); ctx.rotate(p.r); ctx.globalAlpha = Math.min(1, p.t * 2); ctx.fillStyle = col; ctx.beginPath(); ctx.moveTo(-p.s / 2, -p.s / 3); ctx.lineTo(p.s / 2, -p.s / 4); ctx.lineTo(p.s / 3, p.s / 3); ctx.lineTo(-p.s / 3, p.s / 2); ctx.fill(); ctx.restore(); ctx.globalAlpha = 1; }
-  if (state === 'popped' && popT > 1.2) { ctx.fillStyle = '#fff'; ctx.font = '900 54px system-ui'; ctx.textAlign = 'center'; ctx.lineWidth = 8; ctx.strokeStyle = '#000'; ctx.strokeText('砰！', CX, 260); ctx.fillText('砰！', CX, 260); }
+  if (state === 'popped' && popT > 1.2 && !timedOut) { ctx.fillStyle = '#fff'; ctx.font = '900 54px system-ui'; ctx.textAlign = 'center'; ctx.lineWidth = 8; ctx.strokeStyle = '#000'; ctx.strokeText('砰！', CX, 260); ctx.fillText('砰！', CX, 260); }
   // 吹氣量
   ctx.fillStyle = 'rgba(0,0,0,.45)'; ctx.fillRect(14, 160, 16, 180); ctx.fillStyle = '#22d3ee'; ctx.fillRect(14, 340 - 180 * level, 16, 180 * level);
-  ctx.strokeStyle = '#fff3'; ctx.strokeRect(14, 160, 16, 180); ctx.fillStyle = '#fff'; ctx.font = '700 10px system-ui'; ctx.textAlign = 'center'; ctx.fillText('吹氣', 22, 152);
+  ctx.strokeStyle = '#fff3'; ctx.strokeRect(14, 160, 16, 180); ctx.strokeStyle = '#fde047'; ctx.setLineDash([3, 3]); ctx.beginPath(); ctx.moveTo(10, 340 - 180 * .1); ctx.lineTo(34, 340 - 180 * .1); ctx.stroke(); ctx.setLineDash([]); ctx.fillStyle = '#fff'; ctx.font = '700 10px system-ui'; ctx.textAlign = 'center'; ctx.fillText(mode === 'shout' ? '音量' : '吹氣', 22, 152); ctx.fillStyle = level > .1 ? '#67e8f9' : '#94a3b8'; ctx.fillText(`風力 ${Math.round(level * 100)}%`, 34, 358);
   if (lastScore !== null && (state === 'result' || state === 'popped')) {
     ctx.font = '900 36px system-ui'; ctx.lineWidth = 7; ctx.strokeStyle = '#000'; ctx.fillStyle = lastScore >= 80 ? '#fde047' : lastScore > 0 ? '#fff' : '#f87171';
-    const s = lastScore === 0 ? '0 分' : `${lastScore} 分`; ctx.strokeText(s, CX, 80); ctx.fillText(s, CX, 80);
+    const s = lastScore === 0 ? (timedOut ? '⏰ 0 分' : '0 分') : `${lastScore} 分`; ctx.strokeText(s, CX, 80); ctx.fillText(s, CX, 80);
+  }
+  if (state === 'play') {
+    const rem = Math.max(0, LIMIT - bt), urgent = rem < 3;
+    ctx.font = `900 ${urgent ? 30 : 24}px system-ui`; ctx.textAlign = 'center'; ctx.lineWidth = 5; ctx.strokeStyle = '#000';
+    ctx.fillStyle = urgent ? (Math.floor(time * 4) % 2 ? '#f87171' : '#fff') : '#fde047';
+    const tx = `⏳ ${rem.toFixed(1)}`; ctx.strokeText(tx, W - 62, 40); ctx.fillText(tx, W - 62, 40);
+    if (mode === 'shout' && shoutRun > .5) { ctx.font = '700 13px system-ui'; ctx.fillStyle = '#a5f3fc'; ctx.fillText(`🗣️ 連續 ${shoutRun.toFixed(1)} 秒`, CX, 120); }
   }
   if (state === 'calib') { ctx.fillStyle = 'rgba(0,0,0,.5)'; ctx.fillRect(60, 180, 280, 60); ctx.fillStyle = '#fff'; ctx.font = '900 18px system-ui'; ctx.textAlign = 'center'; ctx.fillText('🤫 安靜一下，測量環境噪音…', 200, 216); }
   if (duo && state !== 'menu' && state !== 'over') { ctx.fillStyle = player ? '#f9a8d4' : '#93c5fd'; ctx.font = '900 16px system-ui'; ctx.textAlign = 'left'; ctx.fillText(`▶ ${NAMES[player]}`, 12, 26); }
@@ -273,8 +300,8 @@ function draw() {
 
 let last = performance.now(), fast = 1;
 function loop(now) { const dt = Math.min(.033, (now - last) / 1000); last = now; for (let i = 0; i < fast; i++) update(dt); draw(); requestAnimationFrame(loop); }
-resize(); hud(); requestAnimationFrame(loop);
-window.__bl = { get state() { return state; }, get size() { return size; }, get R() { return R; }, get scores() { return scores; }, get round() { return round; }, get player() { return player; }, setBlow: v => { fakeBlow = v; }, lockIn, start, set fast(v) { fast = v; } };
+resize(); setMode(mode); hud(); requestAnimationFrame(loop);
+window.__bl = { setMode, get bt() { return bt; }, get times() { return times; }, get state() { return state; }, get size() { return size; }, get R() { return R; }, get scores() { return scores; }, get round() { return round; }, get player() { return player; }, setBlow: v => { fakeBlow = v; }, lockIn, start, set fast(v) { fast = v; } };
 })();
 </script>
 </body>
