@@ -1,0 +1,734 @@
+<!DOCTYPE html>
+<html lang="zh-Hant">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1,maximum-scale=1,user-scalable=no">
+<title>丟泥巴大戰</title>
+<style>
+  html,body{margin:0;height:100%;background:#1b140d;color:#fff;font-family:system-ui,-apple-system,"PingFang TC","Noto Sans TC",sans-serif;overflow:hidden;touch-action:none;user-select:none;-webkit-user-select:none}
+  #app{max-width:520px;margin:0 auto;height:100%;display:flex;flex-direction:column}
+  #hud{display:flex;justify-content:space-between;align-items:center;padding:8px 12px 2px;font-size:12px;color:#e8d9c4}
+  #hud b{display:block;font-size:20px;color:#ffd166;line-height:1.1}
+  #hud .mid{text-align:center}
+  .pips{font-size:15px;letter-spacing:1px;line-height:1.2}
+  #wrap{position:relative;flex:1;min-height:0;display:flex;justify-content:center;align-items:center}
+  canvas{display:block;touch-action:none;border-radius:12px}
+  #ctrl{display:grid;grid-template-columns:1fr 1fr;gap:12px;padding:8px 12px 14px}
+  #ctrl button{border:0;border-radius:18px;color:#fff;font-weight:900;height:76px;touch-action:none;font-size:15px;background:#6b4a2b;box-shadow:0 5px 0 #3a2715}
+  #ctrl button span{display:block;font-size:28px;line-height:1}
+  #ctrl button.on{transform:translateY(4px);box-shadow:0 1px 0 #0006;background:#8a6239}
+  .ov{position:absolute;inset:0;display:flex;align-items:center;justify-content:center;z-index:5}
+  .box{background:#2a1d12f2;border:2px solid #b07d45;border-radius:16px;padding:16px;width:min(330px,90%);text-align:center;max-height:94%;overflow:auto}
+  .box h2{margin:0 0 6px;font-size:27px;color:#ffd166}
+  .box p{font-size:13px;line-height:1.75;margin:6px 0 10px;text-align:left}
+  .go{width:100%;background:#c0392b;color:#fff;border:0;border-radius:12px;padding:13px;font-size:17px;font-weight:800;margin-top:6px}
+  .stats{display:grid;grid-template-columns:1fr 1fr;gap:6px;margin:8px 0}
+  .stats div{background:#0006;border-radius:10px;padding:7px;font-size:11px}
+  .stats b{display:block;font-size:18px;color:#ffd166}
+  [hidden]{display:none!important}
+</style>
+</head>
+<body>
+<div id="app">
+  <div id="hud">
+    <div>你被砸臉<div class="pips" id="hMe"></div></div>
+    <div class="mid"><span id="hLv">第 1 關</span><b id="hTime">45</b></div>
+    <div style="text-align:right">分數<b id="hScore">0</b></div>
+  </div>
+  <div id="wrap">
+    <canvas id="c"></canvas>
+    <div class="ov" id="menu"><div class="box">
+      <h2>🟤 丟泥巴大戰</h2>
+      <p>✋ <b>按住畫面</b>捏泥巴，按越久泥巴越大顆。<b>放開</b>就往手指的位置丟過去，瞄準對手的<b>臉</b>！<br>
+      🙋 對手<b>舉起手</b>就是要丟了，按下方的<b>⬅️ ➡️</b>閃開！<br>
+      🙈 被砸中臉會<b>糊住看不到</b>，用手指在畫面上<b>抹一抹</b>可以擦掉。<br>
+      🏆 先砸中對手臉 <b>5 次</b>就過關，被砸臉 5 次就輸了。共 3 關，一關比一關強！</p>
+      <div style="font-size:12px;color:#e8d9c4">最高分：<b id="best" style="color:#ffd166">0</b></div>
+      <button class="go" id="start">開始！</button>
+    </div></div>
+    <div class="ov" id="over" hidden><div class="box">
+      <h2 id="oTitle"></h2>
+      <div id="oMsg" style="font-size:13px;margin-bottom:4px"></div>
+      <div class="stats" id="oStats"></div>
+      <button class="go" id="oBtn">再玩一次</button>
+    </div></div>
+  </div>
+  <div id="ctrl">
+    <button id="bL"><span>⬅️</span>往左閃</button>
+    <button id="bR"><span>➡️</span>往右閃</button>
+  </div>
+</div>
+<script>
+const W = 400, H = 620;
+const cv = document.getElementById('c'), ctx = cv.getContext('2d');
+let SC = 1;
+function fit() {
+  const wr = document.getElementById('wrap'), dpr = Math.min(3, window.devicePixelRatio || 1);
+  const s = Math.min(wr.clientWidth / W, wr.clientHeight / H);
+  cv.style.width = W * s + 'px'; cv.style.height = H * s + 'px';
+  cv.width = Math.round(W * s * dpr); cv.height = Math.round(H * s * dpr); SC = s * dpr;
+}
+window.addEventListener('resize', fit); fit();
+const rnd = (a, b) => a + Math.random() * (b - a), clamp = (v, a, b) => Math.max(a, Math.min(b, v)), lerp = (a, b, k) => a + (b - a) * k;
+
+/* ===== 音效 ===== */
+let AC = null;
+function initAudio() { try { if (!AC) AC = new (window.AudioContext || window.webkitAudioContext)(); if (AC.state === 'suspended') AC.resume(); } catch (e) {} }
+function noise(dur, f0, f1, vol, type = 'lowpass') {
+  if (!AC) return; try {
+    const n = AC.createBuffer(1, AC.sampleRate * dur, AC.sampleRate), d = n.getChannelData(0);
+    for (let i = 0; i < d.length; i++) d[i] = (Math.random() * 2 - 1) * (1 - i / d.length) ** 2;
+    const s = AC.createBufferSource(); s.buffer = n;
+    const f = AC.createBiquadFilter(); f.type = type; f.frequency.setValueAtTime(f0, AC.currentTime); f.frequency.exponentialRampToValueAtTime(f1, AC.currentTime + dur);
+    const g = AC.createGain(); g.gain.value = vol; s.connect(f); f.connect(g); g.connect(AC.destination); s.start();
+  } catch (e) {}
+}
+const splatSnd = (v = 1) => { noise(.28, 900, 120, .9 * v); noise(.12, 2500, 400, .25 * v, 'bandpass'); };
+const whoosh = () => noise(.3, 300, 1800, .18, 'bandpass');
+function tone(f, d, v = .12, type = 'triangle') { if (!AC) return; try { const o = AC.createOscillator(), g = AC.createGain(); o.type = type; o.frequency.value = f;
+  g.gain.setValueAtTime(v, AC.currentTime); g.gain.exponentialRampToValueAtTime(.001, AC.currentTime + d); o.connect(g); g.connect(AC.destination); o.start(); o.stop(AC.currentTime + d); } catch (e) {} }
+const buzz = ms => { try { navigator.vibrate && navigator.vibrate(ms); } catch (e) {} };
+
+/* ===== 背景（比畫面寬，閃躲時有視差） ===== */
+const HY = 236, BW = W + 200;
+const bg = document.createElement('canvas'); bg.width = BW * 2; bg.height = H * 2;
+(() => {
+  const g = bg.getContext('2d'); g.scale(2, 2);
+  const sky = g.createLinearGradient(0, 0, 0, HY); sky.addColorStop(0, '#7fb7e6'); sky.addColorStop(1, '#d9ecf5');
+  g.fillStyle = sky; g.fillRect(0, 0, BW, HY + 2);
+  for (let i = 0; i < 5; i++) { const x = rnd(0, BW), y = rnd(30, 110); g.fillStyle = 'rgba(255,255,255,.85)';
+    for (let k = 0; k < 5; k++) { g.beginPath(); g.ellipse(x + k * 16 - 30, y + Math.sin(k) * 5, 22, 13, 0, 0, Math.PI * 2); g.fill(); } }
+  // 遠山與樹林
+  g.fillStyle = '#8fb88a'; g.beginPath(); g.moveTo(0, HY);
+  for (let x = 0; x <= BW; x += 20) g.lineTo(x, HY - 40 - Math.sin(x / 90) * 18 - Math.sin(x / 37) * 6); g.lineTo(BW, HY); g.fill();
+  for (let x = -10; x < BW + 10; x += rnd(14, 24)) { const h = rnd(20, 40), y = HY - 8;
+    g.fillStyle = `hsl(${rnd(95, 125)},${rnd(30, 45)}%,${rnd(26, 36)}%)`; g.beginPath(); g.ellipse(x, y - h / 2, h * .45, h * .6, 0, 0, Math.PI * 2); g.fill(); }
+  // 木柵欄
+  g.fillStyle = '#7a5a3a';
+  for (let x = 6; x < BW; x += 34) { g.fillRect(x, HY - 26, 5, 30); }
+  g.fillRect(0, HY - 20, BW, 3); g.fillRect(0, HY - 10, BW, 3);
+  // 泥巴田
+  const mud = g.createLinearGradient(0, HY, 0, H); mud.addColorStop(0, '#8a6a48'); mud.addColorStop(.4, '#6e4f31'); mud.addColorStop(1, '#4a321d');
+  g.fillStyle = mud; g.fillRect(0, HY, BW, H - HY);
+  for (let i = 0; i < 1600; i++) { const y = rnd(HY, H), s = .4 + (y - HY) / (H - HY) * 2.4;
+    g.fillStyle = Math.random() < .5 ? `rgba(40,25,12,${rnd(.08, .22)})` : `rgba(190,150,105,${rnd(.06, .16)})`;
+    g.beginPath(); g.ellipse(rnd(0, BW), y, s * rnd(.8, 2.2), s * rnd(.4, .9), 0, 0, Math.PI * 2); g.fill(); }
+  // 水窪（反射天空）
+  for (const [x, y, rx, ry] of [[70, 300, 50, 8], [430, 330, 70, 11], [230, 470, 90, 15], [520, 560, 80, 18], [40, 580, 70, 16]]) {
+    const pg = g.createLinearGradient(0, y - ry, 0, y + ry); pg.addColorStop(0, '#a8c6d6'); pg.addColorStop(1, '#5f7f8c');
+    g.fillStyle = 'rgba(40,25,12,.5)'; g.beginPath(); g.ellipse(x, y + 2, rx + 4, ry + 3, 0, 0, Math.PI * 2); g.fill();
+    g.fillStyle = pg; g.globalAlpha = .75; g.beginPath(); g.ellipse(x, y, rx, ry, 0, 0, Math.PI * 2); g.fill(); g.globalAlpha = 1;
+    g.strokeStyle = 'rgba(255,255,255,.5)'; g.lineWidth = 1.2; g.beginPath(); g.ellipse(x - rx * .2, y - ry * .3, rx * .5, ry * .3, 0, Math.PI * 1.1, Math.PI * 1.7); g.stroke(); }
+  // 草叢
+  for (let i = 0; i < 40; i++) { const x = rnd(0, BW), y = rnd(HY + 4, H), s = .5 + (y - HY) / (H - HY) * 1.6;
+    g.strokeStyle = `hsl(${rnd(80, 110)},40%,${rnd(25, 38)}%)`; g.lineWidth = 1.2 * s;
+    for (let k = 0; k < 5; k++) { g.beginPath(); g.moveTo(x + k * 2 * s, y); g.quadraticCurveTo(x + k * 2 * s + rnd(-3, 3) * s, y - 6 * s, x + k * 2 * s + rnd(-6, 6) * s, y - rnd(8, 14) * s); g.stroke(); } }
+})();
+
+/* ===== 泥巴團形狀 ===== */
+function blobPts(n = 11, j = .22) { const a = []; for (let i = 0; i < n; i++) a.push(1 + rnd(-j, j)); return a; }
+// 用中點二次曲線畫出平滑、不規則的泥巴輪廓
+function blobPath(c, x, y, r, pts) {
+  const n = pts.length, P = [];
+  for (let k = 0; k < n; k++) { const a = k / n * Math.PI * 2; P.push([x + Math.cos(a) * r * pts[k], y + Math.sin(a) * r * pts[k]]); }
+  c.beginPath(); c.moveTo((P[n - 1][0] + P[0][0]) / 2, (P[n - 1][1] + P[0][1]) / 2);
+  for (let k = 0; k < n; k++) { const q = P[(k + 1) % n]; c.quadraticCurveTo(P[k][0], P[k][1], (P[k][0] + q[0]) / 2, (P[k][1] + q[1]) / 2); }
+  c.closePath();
+}
+function drawMudBall(x, y, r, pts, rot = 0, dark = 0) {
+  ctx.save(); ctx.translate(x, y); ctx.rotate(rot);
+  blobPath(ctx, 0, 0, r, pts);
+  const gr = ctx.createRadialGradient(-r * .35, -r * .35, r * .1, 0, 0, r * 1.2);
+  gr.addColorStop(0, dark ? '#6d4a2c' : '#8f6740'); gr.addColorStop(.55, '#5b3b20'); gr.addColorStop(1, '#2e1c0d');
+  ctx.fillStyle = gr; ctx.fill();
+  ctx.fillStyle = 'rgba(30,18,8,.35)';
+  for (let i = 0; i < 4; i++) { ctx.beginPath(); ctx.arc(Math.cos(i * 1.7) * r * .45, Math.sin(i * 2.3) * r * .4, r * .12, 0, Math.PI * 2); ctx.fill(); }
+  ctx.fillStyle = 'rgba(255,240,220,.45)'; ctx.beginPath(); ctx.ellipse(-r * .38, -r * .42, r * .22, r * .12, -.6, 0, Math.PI * 2); ctx.fill();
+  ctx.fillStyle = 'rgba(255,240,220,.25)'; ctx.beginPath(); ctx.arc(r * .2, -r * .5, r * .07, 0, Math.PI * 2); ctx.fill();
+  ctx.restore();
+}
+
+/* ===== 糊在你臉上的泥巴（離屏圖層，可用手指抹掉） ===== */
+const mudC = document.createElement('canvas'); mudC.width = W * 2; mudC.height = H * 2;
+const mg = mudC.getContext('2d'); mg.scale(2, 2);
+let mudAlpha = 0, mudHold = 0, mudPix = 0;
+function splatFace(big) {
+  const cx = rnd(160, 240), cy = rnd(250, 340), n = big ? 11 : 8;
+  // 底層：一大片厚泥
+  const base = mg.createRadialGradient(cx, cy, 20, cx, cy, 330);
+  base.addColorStop(0, 'rgba(92,62,36,1)'); base.addColorStop(.7, 'rgba(70,45,22,.97)'); base.addColorStop(1, 'rgba(60,38,18,0)');
+  mg.fillStyle = base; blobPath(mg, cx, cy, 300, blobPts(18, .25)); mg.fill();
+  for (let i = 0; i < n; i++) {
+    const x = cx + rnd(-150, 150), y = cy + rnd(-200, 200), r = rnd(60, 130) * (big ? 1.15 : 1);
+    const gr = mg.createRadialGradient(x - r * .35, y - r * .35, r * .05, x, y, r);
+    gr.addColorStop(0, '#8a6038'); gr.addColorStop(.5, '#634022'); gr.addColorStop(1, '#40270f');
+    mg.fillStyle = gr; blobPath(mg, x, y, r, blobPts(16, .28)); mg.fill();
+    for (let d = 0; d < 2; d++) {   // 往下流的泥巴
+      const dx = x + rnd(-r * .6, r * .6), y0 = y + r * .5, len = rnd(50, 130), w = rnd(10, 20);
+      const dg = mg.createLinearGradient(dx - w, 0, dx + w, 0); dg.addColorStop(0, '#3e250e'); dg.addColorStop(.4, '#6a4626'); dg.addColorStop(1, '#3a220c');
+      mg.fillStyle = dg; mg.beginPath(); mg.moveTo(dx - w / 2, y0 - 10);
+      mg.bezierCurveTo(dx - w * .45, y0 + len * .5, dx - w * .3, y0 + len * .8, dx - w * .35, y0 + len);
+      mg.arc(dx, y0 + len, w * .42, Math.PI, 0, true);
+      mg.bezierCurveTo(dx + w * .3, y0 + len * .8, dx + w * .45, y0 + len * .5, dx + w / 2, y0 - 10); mg.fill();
+      mg.fillStyle = 'rgba(255,240,220,.35)'; mg.beginPath(); mg.ellipse(dx - w * .12, y0 + len, w * .12, w * .2, 0, 0, Math.PI * 2); mg.fill();
+    }
+  }
+  // 噴濺小泥點
+  for (let i = 0; i < 60; i++) { const a = rnd(0, 6.28), d = rnd(150, 330), r = rnd(2, 10);
+    mg.fillStyle = `rgba(${rnd(55, 85) | 0},${rnd(35, 52) | 0},${rnd(16, 26) | 0},${rnd(.7, 1).toFixed(2)})`;
+    blobPath(mg, cx + Math.cos(a) * d, cy + Math.sin(a) * d * 1.3, r, blobPts(7, .3)); mg.fill(); }
+  // 顆粒與濕亮反光
+  mg.globalCompositeOperation = 'source-atop';
+  for (let i = 0; i < 900; i++) { mg.fillStyle = Math.random() < .55 ? 'rgba(25,14,5,.3)' : 'rgba(160,120,80,.22)'; mg.beginPath(); mg.arc(rnd(0, W), rnd(0, H), rnd(.6, 2.2), 0, Math.PI * 2); mg.fill(); }
+  for (let i = 0; i < 22; i++) { const x = rnd(30, 370), y = rnd(60, 560), l = rnd(8, 22);
+    mg.strokeStyle = 'rgba(255,248,235,.4)'; mg.lineWidth = rnd(1.5, 3); mg.lineCap = 'round';
+    mg.beginPath(); mg.arc(x, y, l, rnd(3.6, 4.2), rnd(4.5, 5.2)); mg.stroke(); }
+  mg.globalCompositeOperation = 'source-over';
+  mudAlpha = 1; mudHold = [2.2, 2.6, 3][lv]; mudPix = 1;
+}
+function wipeAt(x0, y0, x1, y1) {
+  mg.globalCompositeOperation = 'destination-out'; mg.lineCap = 'round'; mg.lineWidth = 58;
+  mg.strokeStyle = 'rgba(0,0,0,.55)'; mg.beginPath(); mg.moveTo(x0, y0); mg.lineTo(x1, y1); mg.stroke();
+  mg.globalCompositeOperation = 'source-over';
+  mudPix = Math.max(0, mudPix - Math.hypot(x1 - x0, y1 - y0) / 1600);
+  if (mudPix <= 0.02) { mudAlpha = 0; mg.clearRect(0, 0, W, H); }
+}
+
+/* ===== 遊戲狀態 ===== */
+const LV = [ // 丟的間隔, 預備時間, 飛行時間, 閃躲機率, 反應時間, 移動速度, 假動作機率
+  { cd: [1.9, 3.0], wind: .85, fly: 1.0, dodge: .25, react: .38, spd: 70, fake: 0, lead: 0 },
+  { cd: [1.4, 2.4], wind: .65, fly: .85, dodge: .45, react: .26, spd: 95, fake: .15, lead: .35 },
+  { cd: [1.0, 1.8], wind: .5, fly: .72, dodge: .62, react: .17, spd: 125, fake: .3, lead: .6 }];
+const NEED = 5, ROUND_T = 45;
+let state = 'menu', lv = 0, t = 0, score = 0, combo = 0, shake = 0, flash = 0;
+let P = 0, Pt = 0, dodgeT = 0, dodgeHeld = 0;
+let opp, balls = [], myBalls = [], texts = [], drops = [];
+let meHit = 0, oppHit = 0, throwsMe = 0, hitsMe = 0, dodged = 0, throwCd = 0;
+let charge = null;
+let best = 0; try { best = +localStorage.getItem('mudBest') || 0; } catch (e) {}
+document.getElementById('best').textContent = best;
+
+function newOpp() {
+  return { x: 200, tx: 200, st: 'idle', t: 0, cd: rnd(1.2, 2), blind: 0, splats: [], shirt: ['#d64545', '#2f7fc1', '#3a9a5b'][lv],
+    hurt: 0, wipe: 0, fake: false, look: 0 };
+}
+function startLevel(l) {
+  pend = null; lv = l; t = 0; meHit = 0; oppHit = 0; balls = []; myBalls = []; texts = []; drops = []; opp = newOpp();
+  P = Pt = 0; mudAlpha = 0; mg.clearRect(0, 0, W, H); charge = null; throwCd = 0;
+  state = 'play'; hud();
+  pop(`第 ${l + 1} 關`, 200, 200, '#ffd166', 30);
+}
+function startGame() {
+  initAudio(); score = 0; combo = 0; throwsMe = 0; hitsMe = 0; dodged = 0;
+  document.getElementById('menu').hidden = true; document.getElementById('over').hidden = true; startLevel(0);
+}
+function hud() {
+  document.getElementById('hLv').textContent = `第 ${lv + 1} 關`;
+  document.getElementById('hTime').textContent = Math.max(0, Math.ceil(ROUND_T - t));
+  document.getElementById('hScore').textContent = score;
+  document.getElementById('hMe').textContent = '🟤'.repeat(meHit) + '⚪'.repeat(Math.max(0, NEED - meHit));
+}
+function pop(s, x, y, col = '#fff', size = 22) { texts.push({ s, x, y, t: 1.2, col, size }); }
+
+/* ===== 投擲 ===== */
+const HEAD_Y = 262, BODY_Y = 330;   // 對手頭部、身體中心（畫面座標）
+const camOff = () => -P * 90;          // 對手層的視差位移
+// 右手：平常張開；捏泥巴時托著泥巴往後拉；放開時沿瞄準方向往前推出去（變小＝往遠處伸），推到最遠時泥巴才離手
+const THROW_T = .38, RELEASE_AT = .16;
+let throwAim = { x: 200, y: 260 }, pend = null;
+function rightHand() {
+  const lean = P * 30, holding = charge && !charge.wiping;
+  const aimAng = (ax, ay, x, y) => clamp(Math.atan2(ay - y, ax - (x + lean)) + Math.PI / 2, -.75, .45);
+  if (throwCd > 0) {
+    const u = 1 - throwCd / THROW_T, ext = u < .45 ? Math.sin(u / .45 * Math.PI / 2) : Math.cos((u - .45) / .55 * Math.PI / 2);
+    const bx = 316, by = 560, dx = throwAim.x - (bx + lean), dy = throwAim.y - by, d = Math.hypot(dx, dy) || 1;
+    return { hx: bx + dx / d * 150 * ext, hy: by + dy / d * 150 * ext, ang: aimAng(throwAim.x, throwAim.y, bx, by), s: 1.25 * (1 - .4 * ext), lean,
+      mode: pend ? 'hold' : 'open', size: pend ? pend.size : 0 };
+  }
+  if (holding) { const hx = 318 + charge.size * 6, hy = 562 + charge.size * 14;
+    return { hx, hy, ang: aimAng(charge.x, clamp(charge.y, 200, 420), hx, hy), s: 1.22 + charge.size * .1, lean, mode: 'hold', size: charge.size }; }
+  return { hx: 306, hy: 538, ang: -.22, s: 1.2, lean, mode: 'open', size: 0 };
+}
+function releaseBall() {   // 推到最遠時，泥巴從手上的位置飛出去
+  const p = pend; pend = null; const h = rightHand();
+  const ly = (-40 - p.size * 5) * h.s, c = Math.cos(h.ang), s = Math.sin(h.ang);
+  const bx = h.hx + h.lean - ly * s, by = h.hy + ly * c;
+  myBalls.push({ e: 0, dur: .5 + p.size * .2, tx: p.sx - camOff(), ty: p.ty, size: p.size, pts: blobPts(), rot: rnd(0, 6), bx, by, r0: (17 + p.size * 12) * h.s });
+}
+function throwMine(sx, sy, size) {
+  // sx,sy：放開手指的畫面位置 → 換成世界座標
+  const ty = clamp(sy, 200, 420);
+  pend = { sx, ty, size }; throwAim = { x: sx, y: ty };
+  throwsMe++; throwCd = THROW_T; whoosh();
+  // 對手看到泥巴飛來，可能閃
+  const L = LV[lv];
+  if (opp.blind <= 0 && Math.random() < L.dodge) {
+    setTimeout(() => { if (state !== 'play' || opp.blind > 0) return;
+      const away = opp.x < (sx - camOff()) ? -1 : 1; opp.tx = clamp(opp.x + away * rnd(70, 110), 70, 330); opp.dash = .45; }, L.react * 1000);
+  }
+}
+function oppThrow() {
+  const L = LV[lv];
+  // 瞄準：當下位置，高關卡會預判你要閃的方向
+  let aim = P;
+  if (Math.random() < L.lead) aim = P === 0 ? (Math.random() < .5 ? -1 : 1) * rnd(.3, .7) : P * rnd(.2, .8);
+  aim = clamp(aim + rnd(-.18, .18), -1, 1);
+  const face = Math.random() < .78;
+  balls.push({ e: 0, dur: L.fly * rnd(.95, 1.08), aim, face, sx: opp.x + 26, sy: 228, pts: blobPts(), rot: rnd(0, 6), spin: rnd(-6, 6) });
+  whoosh();
+}
+
+/* ===== 更新 ===== */
+function update(dt) {
+  if (state !== 'play') return;
+  t += dt;
+  const L = LV[lv];
+  // 閃躲
+  if (dodgeHeld) { Pt = dodgeHeld; dodgeT = Math.max(dodgeT, .15); }
+  else if (dodgeT > 0) { dodgeT -= dt; if (dodgeT <= 0) Pt = 0; }
+  P += (Pt - P) * Math.min(1, dt * 14);
+  // 糊臉淡出
+  if (mudAlpha > 0) { if (mudHold > 0) mudHold -= dt; else { mudAlpha -= dt / [2.4, 2.8, 3.2][lv]; if (mudAlpha <= 0) { mudAlpha = 0; mg.clearRect(0, 0, W, H); } } }
+  if (charge && !charge.wiping) charge.size = Math.min(1, charge.size + dt / 1.1);
+  throwCd -= dt;
+  if (pend && THROW_T - throwCd >= RELEASE_AT) releaseBall();
+  // 對手 AI
+  const o = opp; o.t += dt; o.hurt = Math.max(0, o.hurt - dt); o.look += dt;
+  const spd = (o.dash > 0 ? 420 : L.spd) * (o.blind > 0 ? .3 : 1); o.dash = (o.dash || 0) - dt;
+  if (Math.abs(o.tx - o.x) > 2) o.x += Math.sign(o.tx - o.x) * Math.min(spd * dt, Math.abs(o.tx - o.x));
+  else if (o.st === 'idle' && Math.random() < dt * .8) o.tx = rnd(90, 310);
+  if (o.blind > 0) { o.blind -= dt; o.st = 'blind'; if (o.blind <= 0) { o.st = 'idle'; o.cd = rnd(.8, 1.4); } }
+  else if (o.st === 'idle') { o.cd -= dt; if (o.cd <= 0) { o.st = 'wind'; o.t = 0; o.fake = Math.random() < L.fake; } }
+  else if (o.st === 'wind') {
+    if (o.t > L.wind) {
+      if (o.fake) { o.st = 'idle'; o.cd = rnd(.25, .6); pop('假動作！', o.x + camOff(), 200, '#ffb3b3', 16); }
+      else { oppThrow(); o.st = 'throw'; o.t = 0; }
+    }
+  } else if (o.st === 'throw' && o.t > .35) { o.st = 'idle'; o.cd = rnd(...L.cd); }
+  // 對手丟來的泥巴
+  for (const b of balls) {
+    b.e += dt / b.dur; b.rot += b.spin * dt;
+    if (b.e >= 1 && !b.done) {
+      b.done = true;
+      if (Math.abs(b.aim - P) < .5) {
+        if (b.face) { meHit++; hitsMe++; combo = 0; splatFace(meHit >= 3); splatSnd(1.2); buzz([60, 40, 90]); shake = .5; pop('臉被砸中！', 200, 120, '#ff6b6b', 26); }
+        else { splatSnd(.7); buzz(40); shake = .25; combo = 0; score = Math.max(0, score - 10); drops.push({ x: rnd(140, 260), y: rnd(540, 600), r: rnd(30, 44), pts: blobPts(13, .3), a: 1 }); pop('衣服髒了 -10', 200, 520, '#ffd6a5', 18); }
+        hud();
+        if (meHit >= NEED) return endLevel(false);
+      } else { dodged++; combo++; const add = 15 + combo * 5; score += add; pop(`閃過！+${add}`, 200, 140, '#9be7a1', 22); tone(880, .12, .08); hud(); }
+    }
+  }
+  balls = balls.filter(b => !b.done);
+  // 你丟出去的泥巴
+  for (const m of myBalls) {
+    m.e += dt / m.dur; m.rot += 5 * dt;
+    if (m.e >= 1 && !m.done) {
+      m.done = true;
+      const hr = 7 + m.size * 9, dx = m.tx - o.x;
+      const sp = { x: dx, y: m.ty - HEAD_Y, r: 6 + m.size * 6, pts: blobPts(9, .35) };
+      if (Math.hypot(dx, m.ty - HEAD_Y) < 20 + hr) {
+        oppHit++; combo++; const add = Math.round((100 + m.size * 80) * (1 + combo * .1)) * (o.blind > 0 ? 1 : 1);
+        score += add; o.blind = [2.4, 2.0, 1.6][lv] + m.size * .8; o.hurt = .6; o.wipe = 0; o.st = 'blind';
+        o.splats.push({ ...sp, face: true }); splatSnd(1); buzz(30);
+        pop(`正中臉！+${add}`, o.x + camOff(), 200, '#ffd166', 24); flash = .15;
+        if (oppHit >= NEED) { hud(); return endLevel(true); }
+      } else if (Math.abs(dx) < 28 + hr && m.ty > HEAD_Y + 18 && m.ty < 440) {
+        const add = 30 + Math.round(m.size * 20); score += add; o.hurt = .35; o.splats.push({ ...sp, face: false }); splatSnd(.6);
+        pop(`砸中身體 +${add}`, o.x + camOff(), 250, '#ffe9a8', 18);
+      } else { combo = 0; pop('沒中', m.tx + camOff(), m.ty - 20, '#ddd', 15); noise(.15, 500, 150, .25); }
+      hud();
+    }
+  }
+  myBalls = myBalls.filter(m => !m.done);
+  for (const x of texts) { x.t -= dt; x.y -= 24 * dt; } texts = texts.filter(x => x.t > 0);
+  for (const d of drops) d.a -= dt * .25; drops = drops.filter(d => d.a > 0);
+  shake = Math.max(0, shake - dt); flash = Math.max(0, flash - dt);
+  if (t >= ROUND_T) endLevel(oppHit > meHit ? true : oppHit < meHit ? false : null);
+  hud();
+}
+function endLevel(win) {
+  state = 'over'; charge = null; dodgeHeld = 0;
+  if (win) score += 200 + (NEED - meHit) * 60;
+  if (score > best) { best = score; try { localStorage.setItem('mudBest', best); } catch (e) {} }
+  const last = lv === LV.length - 1;
+  const T = document.getElementById('oTitle'), M = document.getElementById('oMsg'), B = document.getElementById('oBtn');
+  if (win === null) { T.textContent = '🤝 平手！'; M.textContent = '時間到，雙方一樣多，再比一次！'; B.textContent = '再比一次'; B.onclick = () => { document.getElementById('over').hidden = true; startLevel(lv); }; }
+  else if (win && !last) { T.textContent = `🎉 第 ${lv + 1} 關過關！`; M.textContent = '下一個對手更快、更會閃，還會假動作！'; B.textContent = `挑戰第 ${lv + 2} 關`; B.onclick = () => { document.getElementById('over').hidden = true; startLevel(lv + 1); }; tone(660, .2); setTimeout(() => tone(990, .3), 150); }
+  else if (win) { T.textContent = '🏆 泥巴大王！'; M.textContent = '三關全破，你是泥巴戰之王！'; B.textContent = '再玩一次'; B.onclick = startGame; tone(660, .2); setTimeout(() => tone(990, .4), 150); }
+  else { T.textContent = '😵 被糊成泥人了'; M.textContent = `在第 ${lv + 1} 關敗下陣來`; B.textContent = '再玩一次'; B.onclick = startGame; tone(200, .4, .1, 'sawtooth'); }
+  document.getElementById('oStats').innerHTML = `<div>分數<b>${score}</b></div><div>最高分<b>${best}</b></div><div>砸中對手臉<b>${oppHit}</b></div><div>被砸臉<b>${meHit}</b></div><div>閃過<b>${dodged}</b></div><div>命中率<b>${throwsMe ? Math.round(oppHit / throwsMe * 100) : 0}%</b></div>`;
+  document.getElementById('over').hidden = false; hud();
+}
+
+/* ===== 繪圖：對手 ===== */
+/* ===== 繪圖工具：有圓柱光影的肢體 ===== */
+const SKIN = { l: '#f8d5b3', m: '#eab68e', d: '#b9774f', o: 'rgba(105,58,32,.6)' };
+function tube(pts, ws, col = SKIN, hl = .3) {
+  const n = pts.length, L = [], R = [];
+  for (let i = 0; i < n; i++) {
+    const a = pts[Math.max(0, i - 1)], b = pts[Math.min(n - 1, i + 1)];
+    let dx = b[0] - a[0], dy = b[1] - a[1]; const d = Math.hypot(dx, dy) || 1; dx /= d; dy /= d;
+    const w = ws[i] / 2; L.push([pts[i][0] - dy * w, pts[i][1] + dx * w]); R.push([pts[i][0] + dy * w, pts[i][1] - dx * w]);
+  }
+  const p0 = pts[0], p1 = pts[n - 1];
+  ctx.beginPath(); ctx.moveTo(L[0][0], L[0][1]);
+  for (let i = 1; i < n; i++) { const m = [(L[i - 1][0] + L[i][0]) / 2, (L[i - 1][1] + L[i][1]) / 2]; ctx.quadraticCurveTo(L[i - 1][0], L[i - 1][1], m[0], m[1]); }
+  ctx.lineTo(L[n - 1][0], L[n - 1][1]);
+  const ae = Math.atan2(R[n - 1][1] - p1[1], R[n - 1][0] - p1[0]), be = Math.atan2(L[n - 1][1] - p1[1], L[n - 1][0] - p1[0]);
+  ctx.arc(p1[0], p1[1], ws[n - 1] / 2, be, ae, true);
+  for (let i = n - 2; i >= 0; i--) { const m = [(R[i + 1][0] + R[i][0]) / 2, (R[i + 1][1] + R[i][1]) / 2]; ctx.quadraticCurveTo(R[i + 1][0], R[i + 1][1], m[0], m[1]); }
+  ctx.lineTo(R[0][0], R[0][1]);
+  const as = Math.atan2(R[0][1] - p0[1], R[0][0] - p0[0]), bs = Math.atan2(L[0][1] - p0[1], L[0][0] - p0[0]);
+  ctx.arc(p0[0], p0[1], ws[0] / 2, as, bs, true);
+  ctx.closePath();
+  let ax = p1[0] - p0[0], ay = p1[1] - p0[1]; const ad = Math.hypot(ax, ay) || 1; ax /= ad; ay /= ad;
+  const wm = Math.max(...ws) / 2, cx = (p0[0] + p1[0]) / 2, cy = (p0[1] + p1[1]) / 2;
+  const g = ctx.createLinearGradient(cx - ay * wm, cy + ax * wm, cx + ay * wm, cy - ax * wm);
+  g.addColorStop(0, col.d); g.addColorStop(hl * .6, col.m); g.addColorStop(hl, col.l); g.addColorStop(Math.min(.95, hl + .3), col.m); g.addColorStop(1, col.d);
+  ctx.fillStyle = g; ctx.fill(); ctx.strokeStyle = col.o; ctx.lineWidth = .9; ctx.stroke();
+}
+// 遠方對手的小手（手背、拇指、指縫），ang = 手指方向
+function smallHand(x, y, ang, s = 1) {
+  ctx.save(); ctx.translate(x, y); ctx.rotate(ang); ctx.scale(s, s);
+  const g = ctx.createLinearGradient(0, -6, 0, 6); g.addColorStop(0, '#f6cfaa'); g.addColorStop(1, '#c98a62');
+  ctx.fillStyle = g; ctx.beginPath(); ctx.moveTo(-3, -5); ctx.quadraticCurveTo(6, -6.5, 9, -3.5); ctx.quadraticCurveTo(11, 0, 9, 3.5);
+  ctx.quadraticCurveTo(5, 6, -3, 5); ctx.closePath(); ctx.fill(); ctx.strokeStyle = SKIN.o; ctx.lineWidth = .7; ctx.stroke();
+  ctx.strokeStyle = 'rgba(120,65,40,.55)'; ctx.lineWidth = .6;
+  for (const yy of [-2.2, 0, 2.2]) { ctx.beginPath(); ctx.moveTo(5, yy); ctx.lineTo(9.6, yy * 1.1); ctx.stroke(); }
+  ctx.fillStyle = '#e8b089'; ctx.beginPath(); ctx.ellipse(2, -5.5, 4, 2, -.5, 0, Math.PI * 2); ctx.fill(); ctx.strokeStyle = SKIN.o; ctx.stroke();
+  ctx.restore();
+}
+function shirtSleeve(sx, sy, ex, ey, shirt) {   // T恤短袖
+  const ang = Math.atan2(ey - sy, ex - sx), k = .55, mx = lerp(sx, ex, k), my = lerp(sy, ey, k);
+  ctx.save(); ctx.translate(sx, sy); ctx.rotate(ang);
+  const len = Math.hypot(mx - sx, my - sy) + 2;
+  const g = ctx.createLinearGradient(0, -10, 0, 10); g.addColorStop(0, shade(shirt, .12)); g.addColorStop(.5, shirt); g.addColorStop(1, shade(shirt, -.45));
+  ctx.fillStyle = g; ctx.beginPath(); ctx.moveTo(-9, -11); ctx.quadraticCurveTo(len * .6, -12, len, -9.5); ctx.lineTo(len + 1, 9.5); ctx.quadraticCurveTo(len * .5, 12, -9, 11); ctx.closePath(); ctx.fill();
+  ctx.strokeStyle = 'rgba(0,0,0,.35)'; ctx.lineWidth = .8; ctx.stroke();
+  ctx.strokeStyle = 'rgba(0,0,0,.2)'; ctx.beginPath(); ctx.moveTo(len - 2, -8); ctx.lineTo(len - 1, 8); ctx.stroke();
+  ctx.restore();
+}
+function oppArm(R, shirt, ball, back) {
+  const [sx, sy, ex, ey, hx, hy] = R;
+  tube([[sx, sy], [ex, ey]], [15, 12]);   // 上臂
+  tube([[ex, ey], [lerp(ex, hx, .45), lerp(ey, hy, .45)], [hx, hy]], [11.5, 10.5, 8]);   // 前臂
+  shirtSleeve(sx, sy, ex, ey, shirt);
+  const ang = Math.atan2(hy - ey, hx - ex);
+  if (ball) drawMudBall(hx + Math.cos(ang) * 6, hy + Math.sin(ang) * 6 - 3, 9, OPP_BALL, t);
+  smallHand(hx, hy, ang, 1);
+}
+const OPP_BALL = blobPts();
+function drawOpp() {
+  const o = opp, x = o.x + camOff(), by = 440;
+  const bob = Math.sin(t * 6) * 1.5 * (o.st === 'idle' ? 1 : 0), hurtX = o.hurt > 0 ? Math.sin(o.hurt * 40) * 3 : 0;
+  ctx.save(); ctx.translate(x + hurtX, bob);
+  ctx.fillStyle = 'rgba(30,18,8,.4)'; ctx.beginPath(); ctx.ellipse(0, by + 4, 42, 8, 0, 0, Math.PI * 2); ctx.fill();
+  // 腿：膝蓋、小腿肚，穿雨鞋
+  for (const s of [-1, 1]) {
+    tube([[s * 11, 372], [s * 12.5, 398], [s * 13, 404], [s * 13.5, 416]], [16, 13, 13.5, 11], SKIN, s < 0 ? .3 : .45);
+    ctx.fillStyle = 'rgba(150,85,55,.35)'; ctx.beginPath(); ctx.ellipse(s * 12.5, 398, 4, 2.2, 0, 0, Math.PI * 2); ctx.fill();   // 膝蓋
+    const bt = ctx.createLinearGradient(s * 13.5 - 10, 0, s * 13.5 + 10, 0); bt.addColorStop(0, '#1d3823'); bt.addColorStop(.4, '#467a50'); bt.addColorStop(.55, '#5d9467'); bt.addColorStop(1, '#183020');
+    ctx.fillStyle = bt; ctx.beginPath(); ctx.moveTo(s * 13.5 - 9, 414); ctx.lineTo(s * 13.5 + 9, 414); ctx.lineTo(s * 13.5 + 9.5, 434);
+    ctx.quadraticCurveTo(s * 13.5 + 11, 441, s * 13.5 + 4, 442); ctx.lineTo(s * 13.5 - 4, 442); ctx.quadraticCurveTo(s * 13.5 - 11, 441, s * 13.5 - 9.5, 434); ctx.closePath(); ctx.fill();
+    ctx.strokeStyle = 'rgba(0,0,0,.45)'; ctx.lineWidth = .8; ctx.stroke();
+    ctx.fillStyle = 'rgba(255,255,255,.18)'; ctx.fillRect(s * 13.5 - 3, 417, 2, 15);
+    ctx.fillStyle = '#142217'; ctx.fillRect(s * 13.5 - 9.5, 412, 19, 3.5);
+    const mb = ctx.createLinearGradient(0, 426, 0, 441); mb.addColorStop(0, 'rgba(95,62,32,0)'); mb.addColorStop(1, 'rgba(95,62,32,.9)');
+    ctx.fillStyle = mb; ctx.fillRect(s * 13.5 - 10, 426, 20, 16);   // 鞋底沾泥
+  }
+  // 短褲
+  const sh = ctx.createLinearGradient(-27, 0, 27, 0); sh.addColorStop(0, '#5c4c30'); sh.addColorStop(.35, '#a28c5e'); sh.addColorStop(.6, '#8f7a4f'); sh.addColorStop(1, '#4e4028');
+  ctx.fillStyle = sh; ctx.beginPath(); ctx.moveTo(-25, 344); ctx.lineTo(25, 344); ctx.quadraticCurveTo(28, 362, 28, 382); ctx.lineTo(4, 385); ctx.quadraticCurveTo(1, 376, 0, 368);
+  ctx.quadraticCurveTo(-1, 376, -4, 385); ctx.lineTo(-28, 382); ctx.quadraticCurveTo(-28, 362, -25, 344); ctx.closePath(); ctx.fill();
+  ctx.strokeStyle = 'rgba(40,30,15,.55)'; ctx.lineWidth = .9; ctx.stroke();
+  ctx.strokeStyle = 'rgba(40,30,15,.3)'; ctx.beginPath(); ctx.moveTo(-18, 350); ctx.quadraticCurveTo(-14, 360, -20, 372); ctx.moveTo(18, 350); ctx.quadraticCurveTo(14, 360, 20, 372); ctx.stroke();
+  // 手臂姿勢
+  let R, Lh;
+  if (o.st === 'wind') { const k = Math.min(1, o.t / (LV[lv].wind * .6)); R = [23, 296, 40 + k * 4, 276 - k * 12, 32 + k * 4, 248 - k * 16]; }
+  else if (o.st === 'throw') { const k = Math.min(1, o.t / .15); R = [23, 296, 36, 290 - 10 * (1 - k), lerp(34, 16, k), lerp(232, 304, k)]; }
+  else if (o.st === 'blind') { const w = Math.sin(t * 12) * 5; R = [23, 296, 32, 296, 9 + w, 270]; }
+  else R = [23, 296, 29, 323, 29, 348];
+  Lh = o.st === 'blind' ? [-23, 296, -32, 296, -9 - Math.sin(t * 12) * 5, 270] : o.st === 'wind' ? [-23, 296, -36, 310, -30, 290] : [-23, 296, -29, 323, -28, 348];
+  const behind = (R[5] < 300 && o.st !== 'blind');
+  // 脖子
+  tube([[0, 278], [0, 294]], [14, 15], SKIN, .4);
+  ctx.fillStyle = 'rgba(120,65,40,.35)'; ctx.beginPath(); ctx.ellipse(0, 283, 7, 3, 0, 0, Math.PI); ctx.fill();
+  // T恤：肩膀、腰身、領口、皺褶
+  const ts = ctx.createLinearGradient(-30, 0, 30, 0); ts.addColorStop(0, shade(o.shirt, -.45)); ts.addColorStop(.35, shade(o.shirt, .1)); ts.addColorStop(.55, o.shirt); ts.addColorStop(1, shade(o.shirt, -.5));
+  ctx.fillStyle = ts; ctx.beginPath(); ctx.moveTo(-8, 289); ctx.quadraticCurveTo(-18, 288, -25, 293); ctx.quadraticCurveTo(-31, 298, -28, 312);
+  ctx.quadraticCurveTo(-25, 330, -26, 352); ctx.quadraticCurveTo(0, 356, 26, 352); ctx.quadraticCurveTo(25, 330, 28, 312); ctx.quadraticCurveTo(31, 298, 25, 293); ctx.quadraticCurveTo(18, 288, 8, 289);
+  ctx.quadraticCurveTo(0, 296, -8, 289); ctx.closePath(); ctx.fill(); ctx.strokeStyle = 'rgba(0,0,0,.35)'; ctx.lineWidth = .9; ctx.stroke();
+  ctx.strokeStyle = shade(o.shirt, -.35); ctx.lineWidth = 2; ctx.beginPath(); ctx.moveTo(-8, 289.5); ctx.quadraticCurveTo(0, 296.5, 8, 289.5); ctx.stroke();
+  ctx.lineCap = 'round';
+  for (const [a, b, c, d, e2, f] of [[-16, 318, -4, 324, 8, 322], [-20, 338, -6, 342, 12, 339], [6, 302, 12, 310, 18, 318], [-22, 304, -18, 312, -19, 322]]) {
+    ctx.strokeStyle = 'rgba(0,0,0,.2)'; ctx.lineWidth = 1.6; ctx.beginPath(); ctx.moveTo(a, b); ctx.quadraticCurveTo(c, d, e2, f); ctx.stroke();
+    ctx.strokeStyle = 'rgba(255,255,255,.12)'; ctx.lineWidth = 1; ctx.beginPath(); ctx.moveTo(a, b - 1.5); ctx.quadraticCurveTo(c, d - 1.5, e2, f - 1.5); ctx.stroke(); }
+  for (const s of o.splats) if (!s.face) drawSplat(s.x, s.y + HEAD_Y, s.r, s.pts);
+  const holding = o.st === 'wind' || (o.st === 'idle' && o.cd < .4);
+  oppArm(Lh, o.shirt, false); oppArm(R, o.shirt, holding);
+  // 頭
+  const hy = HEAD_Y, look = Math.sin(o.look * .7) * 1.5;
+  for (const s of [-1, 1]) {   // 耳朵
+    ctx.fillStyle = '#e7b08a'; ctx.beginPath(); ctx.ellipse(s * 17.5, hy + 1, 3.8, 6.5, s * .15, 0, Math.PI * 2); ctx.fill(); ctx.strokeStyle = SKIN.o; ctx.lineWidth = .7; ctx.stroke();
+    ctx.strokeStyle = 'rgba(140,75,50,.6)'; ctx.beginPath(); ctx.ellipse(s * 17.8, hy + 1, 1.8, 4, s * .15, -1.2, 1.6); ctx.stroke(); }
+  // 臉型：額頭→顴骨→下顎→下巴
+  ctx.beginPath(); ctx.moveTo(-16, hy - 8); ctx.bezierCurveTo(-17, hy - 26, 17, hy - 26, 16, hy - 8);
+  ctx.bezierCurveTo(17, hy + 4, 14, hy + 12, 9, hy + 18); ctx.quadraticCurveTo(4, hy + 22, 0, hy + 22.5); ctx.quadraticCurveTo(-4, hy + 22, -9, hy + 18);
+  ctx.bezierCurveTo(-14, hy + 12, -17, hy + 4, -16, hy - 8); ctx.closePath();
+  const fg = ctx.createRadialGradient(-5, hy - 6, 2, 0, hy, 26); fg.addColorStop(0, '#fcdcbc'); fg.addColorStop(.55, '#efbf97'); fg.addColorStop(1, '#c58660');
+  ctx.fillStyle = fg; ctx.fill(); ctx.strokeStyle = SKIN.o; ctx.lineWidth = .9; ctx.stroke();
+  ctx.save(); ctx.clip();
+  ctx.fillStyle = 'rgba(150,80,50,.18)'; ctx.beginPath(); ctx.ellipse(12, hy + 6, 7, 12, 0, 0, Math.PI * 2); ctx.fill();   // 右側陰影
+  ctx.fillStyle = 'rgba(110,80,70,.12)'; ctx.beginPath(); ctx.ellipse(0, hy + 17, 10, 5, 0, 0, Math.PI * 2); ctx.fill();   // 下巴鬍渣淡影
+  ctx.restore();
+  // 頭髮：有蓬度的短髮
+  const hg = ctx.createLinearGradient(0, hy - 30, 0, hy - 5); hg.addColorStop(0, '#4a3324'); hg.addColorStop(1, '#1e140d');
+  ctx.fillStyle = hg; ctx.beginPath(); ctx.moveTo(-17.5, hy - 2); ctx.bezierCurveTo(-21, hy - 22, -12, hy - 31, 1, hy - 30); ctx.bezierCurveTo(14, hy - 30, 21, hy - 21, 17.5, hy - 2);
+  ctx.quadraticCurveTo(16, hy - 10, 13, hy - 13); ctx.lineTo(10, hy - 11); ctx.lineTo(7, hy - 15); ctx.lineTo(3, hy - 12); ctx.lineTo(-1, hy - 16); ctx.lineTo(-5, hy - 12);
+  ctx.lineTo(-9, hy - 15); ctx.lineTo(-12, hy - 11); ctx.quadraticCurveTo(-15, hy - 9, -17.5, hy - 2); ctx.fill();
+  ctx.lineCap = 'round';
+  for (let i = 0; i < 16; i++) { const a = -2.7 + i * .12; ctx.strokeStyle = i % 3 ? 'rgba(120,90,65,.45)' : 'rgba(10,6,3,.5)'; ctx.lineWidth = .7;
+    ctx.beginPath(); ctx.moveTo(Math.cos(a) * 6, hy - 22 + Math.sin(a) * 4); ctx.quadraticCurveTo(Math.cos(a) * 14, hy - 22 + Math.sin(a) * 6, Math.cos(a) * 17, hy - 12 + Math.sin(a) * 3); ctx.stroke(); }
+  ctx.fillStyle = 'rgba(255,255,255,.18)'; ctx.beginPath(); ctx.ellipse(-6, hy - 25, 6, 2, -.2, 0, Math.PI * 2); ctx.fill();
+  // 五官
+  const blind = o.st === 'blind', hurt = o.hurt > 0;
+  // 鼻子
+  ctx.fillStyle = 'rgba(160,90,60,.28)'; ctx.beginPath(); ctx.moveTo(0, hy - 2); ctx.quadraticCurveTo(3.5, hy + 5, 3, hy + 7.5); ctx.lineTo(-1, hy + 7.5); ctx.closePath(); ctx.fill();
+  ctx.strokeStyle = 'rgba(120,65,40,.6)'; ctx.lineWidth = .8; ctx.beginPath(); ctx.moveTo(-3.2, hy + 7); ctx.quadraticCurveTo(0, hy + 9, 3.2, hy + 7); ctx.stroke();
+  ctx.fillStyle = 'rgba(255,240,225,.5)'; ctx.beginPath(); ctx.ellipse(-.6, hy + 4, .9, 2, 0, 0, Math.PI * 2); ctx.fill();
+  if (blind || hurt) {
+    ctx.strokeStyle = '#3a2416'; ctx.lineWidth = 1.5; ctx.lineCap = 'round';
+    for (const s of [-1, 1]) { ctx.beginPath(); ctx.moveTo(s * 10, hy - 3); ctx.quadraticCurveTo(s * 6.5, hy - 1, s * 3.5, hy - 2.5); ctx.stroke();
+      ctx.beginPath(); ctx.moveTo(s * 10.5, hy - 7); ctx.lineTo(s * 3.5, hy - 5); ctx.stroke(); }
+    ctx.fillStyle = '#5a1f17'; ctx.beginPath(); ctx.moveTo(-5, hy + 13); ctx.quadraticCurveTo(0, hy + 10, 5, hy + 13); ctx.quadraticCurveTo(0, hy + 18, -5, hy + 13); ctx.fill();
+    ctx.fillStyle = '#fff'; ctx.fillRect(-3, hy + 12, 6, 1.6);
+  } else {
+    for (const s of [-1, 1]) {
+      ctx.fillStyle = '#fff'; ctx.beginPath(); ctx.moveTo(s * 10.5, hy - 2); ctx.quadraticCurveTo(s * 7, hy - 5.5, s * 3.3, hy - 2); ctx.quadraticCurveTo(s * 7, hy + .5, s * 10.5, hy - 2); ctx.fill();
+      ctx.fillStyle = '#5a3a22'; ctx.beginPath(); ctx.arc(s * 6.8 + look * .5, hy - 2.1, 1.9, 0, Math.PI * 2); ctx.fill();
+      ctx.fillStyle = '#120a05'; ctx.beginPath(); ctx.arc(s * 6.8 + look * .5, hy - 2.1, .9, 0, Math.PI * 2); ctx.fill();
+      ctx.fillStyle = '#fff'; ctx.beginPath(); ctx.arc(s * 6.8 + look * .5 + .6, hy - 2.8, .5, 0, Math.PI * 2); ctx.fill();
+      ctx.strokeStyle = '#3a2416'; ctx.lineWidth = 1; ctx.beginPath(); ctx.moveTo(s * 10.5, hy - 2); ctx.quadraticCurveTo(s * 7, hy - 5.8, s * 3.3, hy - 2); ctx.stroke();
+      ctx.strokeStyle = '#2b1d14'; ctx.lineWidth = 1.8; ctx.beginPath();
+      if (o.st === 'wind') { ctx.moveTo(s * 11.5, hy - 9); ctx.quadraticCurveTo(s * 7, hy - 8.5, s * 3, hy - 6); } else { ctx.moveTo(s * 11.5, hy - 7.5); ctx.quadraticCurveTo(s * 7, hy - 10, s * 3, hy - 7.8); }
+      ctx.stroke();
+    }
+    ctx.fillStyle = '#b5604f'; ctx.beginPath();   // 嘴唇
+    if (o.st === 'wind') { ctx.moveTo(-6, hy + 13); ctx.quadraticCurveTo(0, hy + 11.5, 6, hy + 12.5); ctx.quadraticCurveTo(0, hy + 17, -6, hy + 13); }
+    else { ctx.moveTo(-5, hy + 13); ctx.quadraticCurveTo(0, hy + 12, 5, hy + 13); ctx.quadraticCurveTo(0, hy + 15.5, -5, hy + 13); }
+    ctx.fill(); ctx.strokeStyle = 'rgba(90,35,25,.7)'; ctx.lineWidth = .8; ctx.beginPath(); ctx.moveTo(-5, hy + 13); ctx.quadraticCurveTo(0, hy + 14, 5, hy + 13); ctx.stroke();
+    ctx.fillStyle = 'rgba(230,120,100,.18)'; for (const s of [-1, 1]) { ctx.beginPath(); ctx.arc(s * 10, hy + 6, 4, 0, Math.PI * 2); ctx.fill(); }
+  }
+  // 臉上的泥巴
+  ctx.save(); ctx.beginPath(); ctx.ellipse(0, hy, 20, 24, 0, 0, Math.PI * 2); ctx.clip();
+  const fs = o.splats.filter(s => s.face);
+  ctx.globalAlpha = blind ? 1 : .55; for (const s of fs.slice(-4)) drawSplat(clamp(s.x, -10, 10), hy + clamp(s.y, -8, 10), s.r * 1.4, s.pts); ctx.globalAlpha = 1;
+  ctx.restore();
+  ctx.restore();
+}
+function drawSplat(x, y, r, pts) {
+  ctx.fillStyle = '#5a3a1e'; blobPath(ctx, x, y, r, pts); ctx.fill(); ctx.fillStyle = 'rgba(255,235,210,.3)'; ctx.beginPath(); ctx.arc(x - r * .3, y - r * .3, r * .22, 0, Math.PI * 2); ctx.fill();
+  ctx.fillStyle = '#4a2e15'; ctx.fillRect(x - 1.5, y, 3, r * 1.4);
+}
+function shade(hex, k) { const n = parseInt(hex.slice(1), 16), f = c => clamp(Math.round(c * (1 + k)), 0, 255);
+  return `rgb(${f(n >> 16)},${f((n >> 8) & 255)},${f(n & 255)})`; }
+
+/* ===== 繪圖：你的雙手（第一人稱，看到手背、手指朝前） ===== */
+const MY_BALL = blobPts(12, .2);
+const ARM = { l: '#f6cfa9', m: '#e3a97f', d: '#a86a45', o: 'rgba(100,55,30,.6)' };
+const NAIL = (x, y, ang, len, w) => {   // 指甲：甲床、甲根、反光
+  ctx.save(); ctx.translate(x, y); ctx.rotate(ang);
+  const g = ctx.createLinearGradient(-w, 0, w, 0); g.addColorStop(0, '#d9a597'); g.addColorStop(.5, '#f7d9cc'); g.addColorStop(1, '#d39c8d');
+  ctx.fillStyle = g; ctx.beginPath(); ctx.moveTo(-w, len * .5); ctx.lineTo(-w, -len * .3); ctx.quadraticCurveTo(-w, -len * .55, 0, -len * .55);
+  ctx.quadraticCurveTo(w, -len * .55, w, -len * .3); ctx.lineTo(w, len * .5); ctx.quadraticCurveTo(0, len * .62, -w, len * .5); ctx.fill();
+  ctx.strokeStyle = 'rgba(140,80,65,.6)'; ctx.lineWidth = .7; ctx.stroke();
+  ctx.fillStyle = 'rgba(255,250,245,.75)'; ctx.beginPath(); ctx.ellipse(0, -len * .45, w * .8, len * .1, 0, 0, Math.PI * 2); ctx.fill();   // 指甲尖白邊
+  ctx.fillStyle = 'rgba(255,255,255,.55)'; ctx.beginPath(); ctx.ellipse(-w * .35, 0, w * .18, len * .3, 0, 0, Math.PI * 2); ctx.fill();
+  ctx.restore();
+};
+// 一根手指：從指節沿 ang 方向伸出，微微彎曲，有兩道關節皺紋和指甲
+function finger(x, y, ang, len, w, curl = .12) {
+  const dx = Math.sin(ang), dy = -Math.cos(ang), nx = Math.cos(ang), ny = Math.sin(ang);
+  const p1 = [x + dx * len * .45 + nx * curl * len * .15, y + dy * len * .45 + ny * curl * len * .15];
+  const p2 = [x + dx * len * .8 + nx * curl * len * .25, y + dy * len * .8 + ny * curl * len * .25];
+  const tip = [x + dx * len + nx * curl * len * .28, y + dy * len + ny * curl * len * .28];
+  tube([[x, y], p1, p2, tip], [w * 1.08, w, w * .92, w * .84], ARM, .42);
+  ctx.strokeStyle = 'rgba(120,65,40,.45)'; ctx.lineWidth = .8;
+  for (const [p, k] of [[p1, 3], [p2, 2]]) for (let i = 0; i < k; i++) {
+    ctx.beginPath(); ctx.ellipse(p[0] + dx * (i - 1) * 1.6, p[1] + dy * (i - 1) * 1.6, w * .38, w * .12, ang, 0, Math.PI); ctx.stroke(); }
+  const a2 = Math.atan2(tip[1] - p2[1], tip[0] - p2[0]) + Math.PI / 2;
+  NAIL(lerp(p2[0], tip[0], .55), lerp(p2[1], tip[1], .55), a2, len * .2, w * .34);
+}
+// 張開的手（手背朝自己）：本地座標手腕在 (0,24)，手指朝上；大拇指在 +x（內側）
+const FINGERS = [ // 指根x, 長度, 粗細, 張開角度
+  { x: 13, len: 34, w: 10, a: .1 }, { x: 4, len: 38, w: 10.4, a: .02 }, { x: -5, len: 35, w: 9.8, a: -.06 }, { x: -13.5, len: 27, w: 8.6, a: -.17 }];
+function handBack(curled) {
+  // 手背
+  const hb = ctx.createLinearGradient(-22, 0, 22, 0); hb.addColorStop(0, ARM.d); hb.addColorStop(.28, ARM.m); hb.addColorStop(.5, ARM.l); hb.addColorStop(.8, ARM.m); hb.addColorStop(1, ARM.d);
+  ctx.fillStyle = hb; ctx.beginPath(); ctx.moveTo(-15, 26); ctx.quadraticCurveTo(-21, 6, -19, -14);
+  ctx.quadraticCurveTo(-17, -22, -9, -21); ctx.quadraticCurveTo(0, -24, 8, -22); ctx.quadraticCurveTo(17, -21, 19, -14);
+  ctx.quadraticCurveTo(23, 4, 17, 26); ctx.closePath(); ctx.fill(); ctx.strokeStyle = ARM.o; ctx.lineWidth = 1; ctx.stroke();
+  // 指節、肌腱、靜脈、細毛
+  for (const f of FINGERS) {
+    ctx.fillStyle = 'rgba(255,240,225,.42)'; ctx.beginPath(); ctx.ellipse(f.x, -18 + Math.abs(f.x) * .08, 3.6, 2.4, 0, 0, Math.PI * 2); ctx.fill();
+    ctx.strokeStyle = 'rgba(255,236,215,.2)'; ctx.lineWidth = 2.6; ctx.beginPath(); ctx.moveTo(f.x * .35, 22); ctx.quadraticCurveTo(f.x * .75, 0, f.x, -15); ctx.stroke();
+    if (curled) { ctx.strokeStyle = 'rgba(120,65,40,.35)'; ctx.lineWidth = .9; ctx.beginPath(); ctx.arc(f.x, -18, 3.5, Math.PI * 1.1, Math.PI * 1.9); ctx.stroke(); }
+  }
+  ctx.strokeStyle = 'rgba(95,115,165,.2)'; ctx.lineWidth = 2; ctx.beginPath(); ctx.moveTo(-4, 24); ctx.bezierCurveTo(-7, 8, 3, 2, 6, -12); ctx.stroke();
+  ctx.beginPath(); ctx.moveTo(4, 8); ctx.quadraticCurveTo(10, 0, 12, -10); ctx.lineWidth = 1.4; ctx.stroke();
+  ctx.strokeStyle = 'rgba(90,55,30,.22)'; ctx.lineWidth = .5;
+  for (let i = 0; i < 16; i++) { const hx = ((i * 37) % 30) - 15, hy = ((i * 53) % 34) - 14; ctx.beginPath(); ctx.moveTo(hx, hy); ctx.lineTo(hx + 1, hy - 3); ctx.stroke(); }
+}
+function thumb(open) {
+  if (open) { tube([[16, 12], [26, -2], [31, -16]], [14, 11.5, 10], ARM, .45); NAIL(31.3, -14.5, .35, 7, 3.6);
+    ctx.strokeStyle = 'rgba(120,65,40,.45)'; ctx.lineWidth = .8; ctx.beginPath(); ctx.ellipse(27.5, -4, 4, 1.3, .6, 0, Math.PI); ctx.stroke(); }
+  else { tube([[16, 12], [23, -4], [21, -20]], [14, 11.5, 10], ARM, .45); NAIL(21.5, -18.5, -.1, 7, 3.6); }
+}
+function openHand(x, y, ang, s, side, dirt) {
+  ctx.save(); ctx.translate(x, y); ctx.rotate(ang); ctx.scale(s * side, s);
+  handBack(false);
+  for (const f of FINGERS) finger(f.x, -19 + Math.abs(f.x) * .08, f.a, f.len, f.w, .1);
+  thumb(true);
+  if (dirt) { ctx.fillStyle = 'rgba(90,58,30,.6)'; blobPath(ctx, -5, 2, 6, dirt); ctx.fill(); blobPath(ctx, 4, -40, 3, dirt); ctx.fill(); }
+  ctx.restore();
+}
+// 托著泥巴準備丟：泥巴在掌心前方，手指往前彎扣住泥巴
+function holdBall(x, y, ang, s, size) {
+  ctx.save(); ctx.translate(x, y); ctx.rotate(ang); ctx.scale(-s, s);
+  const r = 17 + size * 12;
+  drawMudBall(1, -40 - size * 5, r, MY_BALL, 0);
+  handBack(true);
+  for (const f of FINGERS) {   // 彎曲扣住：往前縮短，看到第一、二節
+    const fy = -19 + Math.abs(f.x) * .08, top = -40 - size * 5 + r * .35 - (f.len - 27) * .4;
+    tube([[f.x, fy], [f.x * 1.08, (fy + top) / 2], [f.x * 1.12, top]], [f.w * 1.08, f.w, f.w * .95], ARM, .42);
+    ctx.strokeStyle = 'rgba(120,65,40,.45)'; ctx.lineWidth = .8; ctx.beginPath(); ctx.ellipse(f.x * 1.08, (fy + top) / 2, f.w * .38, f.w * .12, 0, 0, Math.PI); ctx.stroke();
+    ctx.fillStyle = 'rgba(90,58,30,.6)'; ctx.beginPath(); ctx.arc(f.x * 1.12, top, f.w * .42, Math.PI, 0); ctx.fill();
+  }
+  thumb(false);
+  ctx.fillStyle = 'rgba(90,55,30,.55)'; ctx.beginPath(); ctx.ellipse(1, -40 - size * 5 + r * .8, r * .6, 3, 0, 0, Math.PI); ctx.fill();
+  ctx.restore();
+}
+// 從畫面底角連到手腕的前臂
+function forearm(fromX, fromY, x, y, ang, s, hl) {
+  const wx = x - Math.sin(ang) * 16 * s, wy = y + Math.cos(ang) * 16 * s;   // 手腕（本地座標 0,16 → 畫面座標）
+  const mx = lerp(fromX, wx, .5) + (fromX < W / 2 ? -6 : 6), my = lerp(fromY, wy, .5);
+  tube([[fromX, fromY], [mx, my], [wx, wy]], [70 * Math.min(1, s), 50 * s, 33 * s], ARM, hl);
+  ctx.strokeStyle = 'rgba(90,55,30,.13)'; ctx.lineWidth = .5;
+  for (let i = 0; i < 24; i++) { const k = (i + .5) / 24, ax = lerp(fromX, wx, k) + ((i * 13) % 22) - 11, ay = lerp(fromY, wy, k) + ((i * 7) % 18) - 9;
+    ctx.beginPath(); ctx.moveTo(ax, ay); ctx.lineTo(ax + (fromX < W / 2 ? 3 : -3), ay - 2); ctx.stroke(); }
+}
+const DIRT_L = blobPts(8, .35), DIRT_R = blobPts(8, .35);
+function drawHands() {
+  const lean = P * 30;
+  ctx.save(); ctx.translate(lean, 0);
+  // 左手：張開擋在前面
+  const lx = 92, ly = 528, la = .22, ls = 1.25;
+  forearm(-40, H + 50, lx, ly, la, ls, .35);
+  openHand(lx, ly, la, ls, 1, DIRT_L);
+  ctx.restore();
+  // 右手
+  const h = rightHand();
+  ctx.save(); ctx.translate(h.lean, 0);
+  forearm(W + 40, H + 50, h.hx, h.hy, h.ang, h.s, .55);
+  if (h.mode === 'hold') holdBall(h.hx, h.hy, h.ang, h.s, h.size);
+  else openHand(h.hx, h.hy, h.ang, h.s, -1, DIRT_R);
+  ctx.restore();
+}
+
+/* ===== 主畫面 ===== */
+function draw() {
+  ctx.setTransform(SC, 0, 0, SC, 0, 0);
+  const sx = shake > 0 ? rnd(-6, 6) * shake * 2 : 0, sy = shake > 0 ? rnd(-6, 6) * shake * 2 : 0;
+  ctx.save(); ctx.translate(sx, sy);
+  ctx.drawImage(bg, -100 - P * 45, 0, BW, H);
+  if (opp) {
+    drawOpp();
+    // 瞄準輔助：捏泥巴時顯示落點
+    if (charge && !charge.wiping && state === 'play') {
+      ctx.strokeStyle = 'rgba(255,255,255,.9)'; ctx.lineWidth = 2; ctx.setLineDash([5, 4]);
+      ctx.beginPath(); ctx.arc(charge.x, clamp(charge.y, 200, 420), 10 + charge.size * 8, 0, Math.PI * 2); ctx.stroke(); ctx.setLineDash([]);
+    }
+    for (const m of myBalls) { const e = m.e; { const x = lerp(m.bx, m.tx + camOff(), e), y = lerp(m.by, m.ty, e) - Math.sin(e * Math.PI) * 70, r = lerp(m.r0, 6 + m.size * 6, Math.sqrt(e)); drawMudBall(x, y, r, m.pts, m.rot); } }
+    // 對手丟來的泥巴（越飛越大）
+    for (const b of balls) {
+      const e = b.e, ee = e * e, tx = W / 2 + (b.aim - P) * 230, ty = b.face ? 300 : 520;
+      const x = lerp(b.sx + camOff(), tx, ee), y = lerp(b.sy, ty, ee) - Math.sin(e * Math.PI) * 70, r = 7 + ee * 120;
+      ctx.fillStyle = `rgba(30,18,8,${.15 + e * .2})`; ctx.beginPath(); ctx.ellipse(x, lerp(436, 640, ee), r * .8, r * .2, 0, 0, Math.PI * 2); ctx.fill();
+      drawMudBall(x, y, r, b.pts, b.rot, 1);
+      if (e > .55 && Math.abs(b.aim - P) < .5 && state === 'play') {   // 快到了：紅色警告框
+        ctx.strokeStyle = `rgba(255,70,70,${(e - .55) * 1.6})`; ctx.lineWidth = 8; ctx.strokeRect(4, 4, W - 8, H - 8);
+      }
+    }
+  }
+  for (const d of drops) { ctx.globalAlpha = d.a; drawSplat(d.x, d.y, d.r, d.pts); ctx.globalAlpha = 1; }
+  drawHands();
+  ctx.restore();
+  // 糊在臉上的泥巴
+  if (mudAlpha > 0) { ctx.globalAlpha = Math.min(1, mudAlpha); ctx.drawImage(mudC, 0, 0, W, H); ctx.globalAlpha = 1;
+    if (mudAlpha > .5 && state === 'play') { ctx.fillStyle = 'rgba(255,255,255,.85)'; ctx.font = 'bold 16px system-ui'; ctx.textAlign = 'center'; ctx.fillText('👆 用手指抹掉泥巴！', W / 2, H - 24); } }
+  if (flash > 0) { ctx.fillStyle = `rgba(255,255,255,${flash * 2})`; ctx.fillRect(0, 0, W, H); }
+  // 對手分數（右上角）
+  if (opp) { ctx.fillStyle = 'rgba(0,0,0,.4)'; ctx.beginPath(); ctx.roundRect(W - 132, 8, 124, 26, 13); ctx.fill();
+    ctx.fillStyle = '#fff'; ctx.font = 'bold 12px system-ui'; ctx.textAlign = 'left'; ctx.fillText('對手臉', W - 124, 26);
+    ctx.font = '13px system-ui'; ctx.fillText('🟤'.repeat(oppHit) + '⚪'.repeat(NEED - oppHit), W - 82, 26); }
+  for (const x of texts) { ctx.globalAlpha = Math.min(1, x.t * 2); ctx.font = `900 ${x.size}px system-ui`; ctx.textAlign = 'center';
+    ctx.lineWidth = 4; ctx.strokeStyle = 'rgba(40,20,5,.8)'; ctx.strokeText(x.s, x.x, x.y); ctx.fillStyle = x.col; ctx.fillText(x.s, x.x, x.y); ctx.globalAlpha = 1; }
+}
+
+/* ===== 操作 ===== */
+function cpos(e) { const r = cv.getBoundingClientRect(); return [(e.clientX - r.left) / r.width * W, (e.clientY - r.top) / r.height * H]; }
+cv.addEventListener('pointerdown', e => {
+  initAudio(); if (state !== 'play') return;
+  const [x, y] = cpos(e); try { cv.setPointerCapture(e.pointerId); } catch (er) {}
+  charge = { id: e.pointerId, x, y, x0: x, y0: y, lx: x, ly: y, size: 0, wiping: false };
+});
+cv.addEventListener('pointermove', e => {
+  if (!charge || charge.id !== e.pointerId) return;
+  const [x, y] = cpos(e);
+  if (!charge.wiping && mudAlpha > .05 && Math.hypot(x - charge.x0, y - charge.y0) > 22) charge.wiping = true;
+  if (charge.wiping) wipeAt(charge.lx, charge.ly, x, y);
+  charge.x = x; charge.y = y; charge.lx = x; charge.ly = y;
+});
+function release(e) {
+  if (!charge || charge.id !== e.pointerId) return;
+  const c = charge;
+  if (state === 'play' && !c.wiping && throwCd <= 0) throwMine(c.x, c.y, c.size);
+  charge = null;
+}
+cv.addEventListener('pointerup', release); cv.addEventListener('pointercancel', e => { charge = null; });
+function bindDodge(id, dir) {
+  const b = document.getElementById(id);
+  b.addEventListener('pointerdown', e => { e.preventDefault(); initAudio(); if (state !== 'play') return; dodgeHeld = dir; Pt = dir; dodgeT = .45; b.classList.add('on'); try { b.setPointerCapture(e.pointerId); } catch (er) {} });
+  const up = () => { if (dodgeHeld === dir) dodgeHeld = 0; b.classList.remove('on'); };
+  b.addEventListener('pointerup', up); b.addEventListener('pointercancel', up);
+}
+bindDodge('bL', -1); bindDodge('bR', 1);
+const keys = {};
+addEventListener('keydown', e => {
+  if (keys[e.code]) return; keys[e.code] = 1;
+  if (state !== 'play') return;
+  if (e.code === 'ArrowLeft' || e.code === 'KeyA') { dodgeHeld = -1; Pt = -1; dodgeT = .45; }
+  if (e.code === 'ArrowRight' || e.code === 'KeyD') { dodgeHeld = 1; Pt = 1; dodgeT = .45; }
+  if (e.code === 'Space') { initAudio(); charge = { id: 'k', x: opp.x + camOff(), y: HEAD_Y, size: 0, wiping: false }; }
+});
+addEventListener('keyup', e => {
+  keys[e.code] = 0;
+  if ((e.code === 'ArrowLeft' || e.code === 'KeyA') && dodgeHeld === -1) dodgeHeld = 0;
+  if ((e.code === 'ArrowRight' || e.code === 'KeyD') && dodgeHeld === 1) dodgeHeld = 0;
+  if (e.code === 'Space' && charge && charge.id === 'k') { const c = charge; if (state === 'play' && throwCd <= 0) throwMine(opp.x + camOff(), HEAD_Y, c.size); charge = null; }
+});
+document.getElementById('start').onclick = startGame;
+
+let last = performance.now();
+function loop(now) {
+  const dt = Math.min(.05, (now - last) / 1000); last = now;
+  update(dt); draw(); requestAnimationFrame(loop);
+}
+opp = newOpp(); requestAnimationFrame(loop);
+
+window.__mud = { get state() { return state; }, get opp() { return opp; }, get balls() { return balls; }, get myBalls() { return myBalls; },
+  get meHit() { return meHit; }, get oppHit() { return oppHit; }, get score() { return score; }, get lv() { return lv; }, get P() { return P; },
+  get mudAlpha() { return mudAlpha; }, startGame, startLevel, throwMine, wipeAt, camOff, HEAD_Y, setDodge: d => { dodgeHeld = d; Pt = d; dodgeT = .45; } };
+</script>
+</body>
+</html>
