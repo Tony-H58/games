@@ -1,0 +1,690 @@
+<!DOCTYPE html>
+<html lang="zh-Hant">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1,maximum-scale=1,user-scalable=no">
+<title>殭屍怪獸迷宮</title>
+<style>
+  html,body{margin:0;height:100%;background:#0d0b10;color:#fff;font-family:system-ui,-apple-system,"PingFang TC","Noto Sans TC",sans-serif;overflow:hidden;touch-action:none;user-select:none;-webkit-user-select:none}
+  #app{max-width:520px;margin:0 auto;height:100%;display:flex;flex-direction:column}
+  #hud{display:grid;grid-template-columns:1.4fr 1fr 1fr 1fr;gap:6px;padding:8px 10px 4px;font-size:11px;color:#cfc6d8;align-items:end}
+  #hud b{display:block;font-size:16px;color:#ffd166;line-height:1.15}
+  #hpbar{height:12px;background:#3a1d24;border-radius:6px;overflow:hidden;margin-top:3px;border:1px solid #5b2a33}
+  #hpfill{height:100%;background:linear-gradient(#ff6b6b,#c0392b);width:100%;transition:width .15s}
+  #wrap{position:relative;flex:1;min-height:0;display:flex;justify-content:center;align-items:center}
+  canvas{display:block;touch-action:none;border-radius:10px}
+  #ctrl{display:flex;justify-content:space-between;align-items:center;padding:6px 16px 14px;gap:10px}
+  #joy{width:120px;height:120px;border-radius:50%;background:radial-gradient(circle,#ffffff14,#ffffff08);border:2px solid #ffffff22;position:relative;touch-action:none;flex:none}
+  #knob{width:52px;height:52px;border-radius:50%;background:radial-gradient(circle at 35% 35%,#8a7aa8,#4a3d63);position:absolute;left:34px;top:34px;box-shadow:0 3px 8px #0008}
+  .btns{display:flex;gap:12px;align-items:center}
+  .btns button{border:0;border-radius:50%;color:#fff;font-weight:900;touch-action:none;position:relative}
+  #bAtk{width:96px;height:96px;font-size:15px;background:radial-gradient(circle at 35% 30%,#e0574a,#8e1f17);box-shadow:0 5px 0 #4d0f0b}
+  #bSk{width:68px;height:68px;font-size:12px;background:radial-gradient(circle at 35% 30%,#f2a33a,#9a5310);box-shadow:0 4px 0 #4f2a07}
+  .btns button span{display:block;font-size:30px;line-height:1}
+  #bSk span{font-size:22px}
+  .btns button.on{transform:translateY(3px);box-shadow:none}
+  #skCd{position:absolute;inset:0;border-radius:50%;background:#000a;display:flex;align-items:center;justify-content:center;font-size:20px}
+  .ov{position:absolute;inset:0;display:flex;align-items:center;justify-content:center;z-index:5;background:#0008}
+  .box{background:#1d1626f5;border:2px solid #7d5ca8;border-radius:16px;padding:16px;width:min(340px,92%);text-align:center;max-height:94%;overflow:auto}
+  .box h2{margin:0 0 6px;font-size:26px;color:#ffd166}
+  .box p{font-size:13px;line-height:1.75;margin:6px 0 10px;text-align:left}
+  .go{width:100%;background:#7b3fc4;color:#fff;border:0;border-radius:12px;padding:13px;font-size:17px;font-weight:800;margin-top:8px}
+  .shop{display:grid;gap:8px;margin:8px 0}
+  .shop button{display:flex;justify-content:space-between;align-items:center;background:#2c2238;border:1px solid #5d4680;color:#fff;border-radius:12px;padding:12px;font-size:14px;min-height:48px}
+  .shop button:disabled{opacity:.4}
+  .shop button b{color:#ffd166}
+  .stats{display:grid;grid-template-columns:1fr 1fr;gap:6px;margin:8px 0}
+  .stats div{background:#0006;border-radius:10px;padding:7px;font-size:11px}
+  .stats b{display:block;font-size:18px;color:#ffd166}
+  [hidden]{display:none!important}
+</style>
+</head>
+<body>
+<div id="app">
+  <div id="hud">
+    <div>❤️ <span id="hHpT">100/100</span><div id="hpbar"><div id="hpfill"></div></div></div>
+    <div>關卡<b id="hLv">1</b></div>
+    <div>💰 金幣<b id="hGold">0</b></div>
+    <div>🗝️ 鑰匙<b id="hKey">✖</b></div>
+  </div>
+  <div id="wrap">
+    <canvas id="c"></canvas>
+    <div class="ov" id="menu"><div class="box">
+      <h2>🧟 殭屍怪獸迷宮</h2>
+      <p>🕹️ 左下<b>搖桿</b>移動（電腦用方向鍵 / WASD）<br>
+      ⚔️ <b>攻擊</b>：揮劍砍附近的怪（J 或空白鍵）<br>
+      🔥 <b>技能</b>：放出一圈火焰，冷卻 8 秒（K 鍵）<br>
+      📦 碰到<b>寶箱</b>就會打開：金幣、藥水、武器…<br>
+      🗝️ <b>金色寶箱</b>裡有鑰匙，拿到才能打開<b>出口大門</b>！<br>
+      👹 第 5、10 關有<b>魔王</b>，共 10 關，加油！</p>
+      <div style="font-size:12px;color:#cfc6d8">最高紀錄：第 <b id="bestLv" style="color:#ffd166">0</b> 關・<b id="bestSc" style="color:#ffd166">0</b> 分</div>
+      <button class="go" id="start">進入迷宮</button>
+    </div></div>
+    <div class="ov" id="shopOv" hidden><div class="box">
+      <h2 id="sTitle">🎉 第 1 關過關！</h2>
+      <div style="font-size:13px">💰 金幣：<b id="sGold" style="color:#ffd166">0</b></div>
+      <div class="shop">
+        <button id="buyHp"><span>❤️ 血量上限 +25</span><b>30 金幣</b></button>
+        <button id="buyAtk"><span>⚔️ 攻擊力 +5</span><b>40 金幣</b></button>
+        <button id="buyHeal"><span>🧪 補滿血</span><b>20 金幣</b></button>
+        <button id="buySk"><span>🔥 技能冷卻 -1 秒</span><b>50 金幣</b></button>
+      </div>
+      <button class="go" id="next">前往下一關</button>
+    </div></div>
+    <div class="ov" id="over" hidden><div class="box">
+      <h2 id="oTitle"></h2>
+      <div id="oMsg" style="font-size:13px"></div>
+      <div class="stats" id="oStats"></div>
+      <button class="go" id="again">再玩一次</button>
+    </div></div>
+  </div>
+  <div id="ctrl">
+    <div id="joy"><div id="knob"></div></div>
+    <div class="btns">
+      <button id="bSk"><span>🔥</span>技能<div id="skCd" hidden></div></button>
+      <button id="bAtk"><span>⚔️</span>攻擊</button>
+    </div>
+  </div>
+</div>
+<script>
+const W = 400, H = 560, T = 40;
+const cv = document.getElementById('c'), ctx = cv.getContext('2d');
+let SC = 1;
+function fit() {
+  const wr = document.getElementById('wrap'), dpr = Math.min(3, window.devicePixelRatio || 1);
+  const s = Math.min(wr.clientWidth / W, wr.clientHeight / H);
+  cv.style.width = W * s + 'px'; cv.style.height = H * s + 'px';
+  cv.width = Math.round(W * s * dpr); cv.height = Math.round(H * s * dpr); SC = s * dpr;
+  dark.width = cv.width; dark.height = cv.height;
+}
+const dark = document.createElement('canvas'), dg = dark.getContext('2d');
+window.addEventListener('resize', fit); fit();
+const rnd = (a, b) => a + Math.random() * (b - a), ri = (a, b) => Math.floor(rnd(a, b + 1)), clamp = (v, a, b) => Math.max(a, Math.min(b, v)), lerp = (a, b, k) => a + (b - a) * k;
+const pick = a => a[Math.floor(Math.random() * a.length)];
+
+/* ===== 音效 ===== */
+let AC = null;
+function initAudio() { try { if (!AC) AC = new (window.AudioContext || window.webkitAudioContext)(); if (AC.state === 'suspended') AC.resume(); } catch (e) {} }
+function tone(f, d, v = .1, type = 'square', f2) { if (!AC) return; try { const o = AC.createOscillator(), g = AC.createGain(); o.type = type; o.frequency.setValueAtTime(f, AC.currentTime);
+  if (f2) o.frequency.exponentialRampToValueAtTime(f2, AC.currentTime + d);
+  g.gain.setValueAtTime(v, AC.currentTime); g.gain.exponentialRampToValueAtTime(.001, AC.currentTime + d); o.connect(g); g.connect(AC.destination); o.start(); o.stop(AC.currentTime + d); } catch (e) {} }
+function noise(d, f0, f1, v) { if (!AC) return; try { const n = AC.createBuffer(1, AC.sampleRate * d, AC.sampleRate), a = n.getChannelData(0);
+  for (let i = 0; i < a.length; i++) a[i] = (Math.random() * 2 - 1) * (1 - i / a.length);
+  const s = AC.createBufferSource(); s.buffer = n; const f = AC.createBiquadFilter(); f.type = 'bandpass'; f.frequency.setValueAtTime(f0, AC.currentTime); f.frequency.exponentialRampToValueAtTime(f1, AC.currentTime + d);
+  const g = AC.createGain(); g.gain.value = v; s.connect(f); f.connect(g); g.connect(AC.destination); s.start(); } catch (e) {} }
+const sfx = {
+  swing: () => noise(.15, 2500, 600, .25), hit: () => { noise(.1, 900, 200, .4); tone(140, .08, .08, 'square', 70); },
+  hurt: () => tone(220, .25, .12, 'sawtooth', 90), chest: () => { tone(660, .1); setTimeout(() => tone(880, .1), 90); setTimeout(() => tone(1320, .18), 180); },
+  key: () => { tone(988, .1, .1, 'triangle'); setTimeout(() => tone(1319, .25, .1, 'triangle'), 100); }, fire: () => noise(.6, 300, 1500, .35),
+  door: () => { tone(330, .15); setTimeout(() => tone(440, .15), 120); setTimeout(() => tone(660, .3), 240); }, die: () => tone(300, .5, .1, 'sawtooth', 60),
+  arrow: () => noise(.12, 3000, 1200, .15), groan: () => tone(rnd(90, 130), .4, .05, 'sawtooth', 60), slam: () => { noise(.4, 200, 60, .6); tone(60, .4, .15, 'sine', 30); } };
+const buzz = ms => { try { navigator.vibrate && navigator.vibrate(ms); } catch (e) {} };
+
+/* ===== 地圖產生：迷宮＋房間＋環路 ===== */
+let map, MW, MH, chests, door, torches, decor, seen;
+function genLevel(lv) {
+  const cw = Math.min(5 + lv, 13), ch = Math.min(6 + lv, 15);
+  MW = cw * 2 + 1; MH = ch * 2 + 1;
+  map = Array.from({ length: MH }, () => new Array(MW).fill(1));
+  const vis = Array.from({ length: ch }, () => new Array(cw).fill(false)), st = [[0, 0]]; vis[0][0] = true; map[1][1] = 0;
+  while (st.length) {
+    const [cx, cy] = st[st.length - 1], nb = [[1, 0], [-1, 0], [0, 1], [0, -1]].map(([dx, dy]) => [cx + dx, cy + dy, dx, dy]).filter(([x, y]) => x >= 0 && y >= 0 && x < cw && y < ch && !vis[y][x]);
+    if (!nb.length) { st.pop(); continue; }
+    const [nx, ny, dx, dy] = pick(nb); vis[ny][nx] = true; map[cy * 2 + 1 + dy][cx * 2 + 1 + dx] = 0; map[ny * 2 + 1][nx * 2 + 1] = 0; st.push([nx, ny]);
+  }
+  // 打通部分死路，形成環路（比較好閃怪）
+  for (let y = 1; y < MH - 1; y++) for (let x = 1; x < MW - 1; x++) if (map[y][x] === 1 && ((x % 2 === 0 && y % 2 === 1) || (x % 2 === 1 && y % 2 === 0)) && Math.random() < .1) map[y][x] = 0;
+  // 房間
+  const rooms = [];
+  for (let i = 0; i < 2 + Math.floor(lv / 2); i++) {
+    const rw = pick([3, 5]), rh = pick([3, 5]), rx = ri(0, (MW - rw - 2) / 2) * 2 + 1, ry = ri(0, (MH - rh - 2) / 2) * 2 + 1;
+    for (let y = ry; y < ry + rh; y++) for (let x = rx; x < rx + rw; x++) map[y][x] = 0; rooms.push([rx, ry, rw, rh]);
+  }
+  map[1][1] = 0;
+  const dS = bfs(1, 1), cells = [];
+  for (let y = 1; y < MH; y += 2) for (let x = 1; x < MW; x += 2) if (map[y][x] === 0 && dS[y][x] >= 0) cells.push([x, y]);
+  // 出口：離起點最遠
+  let ex = cells.reduce((a, b) => dS[b[1]][b[0]] > dS[a[1]][a[0]] ? b : a);
+  door = { x: ex[0], y: ex[1], open: false };
+  const dE = bfs(ex[0], ex[1]);
+  const deg = (x, y) => [[1, 0], [-1, 0], [0, 1], [0, -1]].filter(([dx, dy]) => map[y + dy][x + dx] === 0).length;
+  const deads = cells.filter(([x, y]) => deg(x, y) === 1 && !(x === 1 && y === 1) && !(x === ex[0] && y === ex[1]));
+  // 金鑰寶箱：離起點和出口都遠
+  const pool = deads.length > 3 ? deads : cells.filter(([x, y]) => !(x === 1 && y === 1) && !(x === ex[0] && y === ex[1]));
+  const kc = pool.reduce((a, b) => Math.min(dS[b[1]][b[0]], dE[b[1]][b[0]]) > Math.min(dS[a[1]][a[0]], dE[a[1]][a[0]]) ? b : a);
+  chests = [{ x: kc[0], y: kc[1], key: true, open: false }];
+  const used = new Set([kc + '', ex + '', '1,1']);
+  const rest = pool.filter(c => !used.has(c + '')).sort(() => Math.random() - .5);
+  for (const c of rest.slice(0, 3 + Math.floor(lv / 2))) { chests.push({ x: c[0], y: c[1], key: false, open: false }); used.add(c + ''); }
+  // 牆上火把、地上裝飾
+  torches = []; decor = [];
+  for (let y = 1; y < MH - 1; y++) for (let x = 1; x < MW - 1; x++) {
+    if (map[y][x] === 1 && map[y + 1] && map[y + 1][x] === 0 && Math.random() < .07) torches.push({ x, y, ph: rnd(0, 6) });
+    if (map[y][x] === 0 && Math.random() < .06) decor.push({ x, y, k: pick(['bone', 'skull', 'crack', 'blood', 'web']), ox: rnd(8, 32), oy: rnd(8, 32), r: rnd(0, 6) });
+  }
+  seen = Array.from({ length: MH }, () => new Array(MW).fill(false));
+  return { dS, cells, used, rooms };
+}
+function bfs(sx, sy, maxD = 999) {
+  const d = Array.from({ length: MH }, () => new Array(MW).fill(-1)), q = [[sx, sy]]; d[sy][sx] = 0;
+  for (let i = 0; i < q.length; i++) { const [x, y] = q[i]; if (d[y][x] >= maxD) continue;
+    for (const [dx, dy] of [[1, 0], [-1, 0], [0, 1], [0, -1]]) { const nx = x + dx, ny = y + dy;
+      if (nx >= 0 && ny >= 0 && nx < MW && ny < MH && map[ny][nx] !== 1 && d[ny][nx] < 0) { d[ny][nx] = d[y][x] + 1; q.push([nx, ny]); } } }
+  return d;
+}
+const solid = (px, py) => { const x = Math.floor(px / T), y = Math.floor(py / T); return x < 0 || y < 0 || x >= MW || y >= MH || map[y][x] === 1 || (map[y][x] === 2 && !door.open); };
+function hitWall(x, y, r) { return solid(x - r, y - r) || solid(x + r, y - r) || solid(x - r, y + r) || solid(x + r, y + r); }
+function moveBody(o, dx, dy) { if (!hitWall(o.x + dx, o.y, o.r)) o.x += dx; if (!hitWall(o.x, o.y + dy, o.r)) o.y += dy; }
+function los(x0, y0, x1, y1) { const d = Math.hypot(x1 - x0, y1 - y0), n = Math.ceil(d / 10); for (let i = 1; i < n; i++) { const k = i / n; if (solid(lerp(x0, x1, k), lerp(y0, y1, k))) return false; } return true; }
+
+/* ===== 遊戲狀態 ===== */
+let state = 'menu', lv = 0, t = 0, pl, mons = [], shots = [], fx = [], texts = [], flow = null, flowT = 0, shake = 0;
+let gold = 0, kills = 0, score = 0, hasKey = false, chestsOpened = 0;
+let best = { lv: 0, sc: 0 }; try { best = JSON.parse(localStorage.getItem('zmBest')) || best; } catch (e) {}
+document.getElementById('bestLv').textContent = best.lv; document.getElementById('bestSc').textContent = best.sc;
+const MT = { // 怪物種類
+  zombie: { hp: 34, spd: 46, dmg: 9, r: 13, pts: 10, gold: [2, 5] },
+  bat: { hp: 14, spd: 105, dmg: 5, r: 10, pts: 8, gold: [1, 3] },
+  skel: { hp: 24, spd: 55, dmg: 8, r: 12, pts: 15, gold: [3, 6] },
+  boss: { hp: 420, spd: 40, dmg: 18, r: 26, pts: 300, gold: [60, 60] } };
+function newPlayer() { return { x: T * 1.5, y: T * 1.5, r: 12, hp: 100, maxHp: 100, atk: 14, wpn: 0, face: 0, swing: 0, atkCd: 0, inv: 0, skCd: 0, skMax: 8, walk: 0, moving: false }; }
+function spawnMon(type, x, y) {
+  const m = MT[type], k = 1 + lv * .12;
+  mons.push({ type, x, y, r: m.r, hp: Math.round(m.hp * k), maxHp: Math.round(m.hp * k), spd: m.spd * (1 + lv * .025), dmg: Math.round(m.dmg * (1 + lv * .08)),
+    cd: rnd(0, 1), hit: 0, kx: 0, ky: 0, ph: rnd(0, 6), aggro: false, slam: null, summon: 6, face: 1 });
+}
+function startLevel(l) {
+  lv = l; t = 0; mons = []; shots = []; fx = []; texts = []; hasKey = false; flow = null;
+  const g = genLevel(lv);
+  pl.x = T * 1.5; pl.y = T * 1.5; pl.inv = 1; pl.skCd = 0;
+  // 怪物：離起點至少 6 格
+  const far = g.cells.filter(([x, y]) => g.dS[y][x] >= 6 && !g.used.has(x + ',' + y)).sort(() => Math.random() - .5);
+  const n = 4 + lv * 2;
+  for (let i = 0; i < n && i < far.length; i++) {
+    const [x, y] = far[i], r = Math.random();
+    const type = lv >= 2 && r < .28 ? 'skel' : lv >= 1 && r < .55 ? 'bat' : 'zombie';
+    spawnMon(type, (x + .5) * T, (y + .5) * T);
+  }
+  // 金鑰寶箱旁邊的守衛
+  const kc = chests[0]; spawnMon('zombie', (kc.x + .5) * T + rnd(-6, 6), (kc.y + .5) * T + rnd(-6, 6));
+  if (lv === 4 || lv === 9) {   // 魔王守在出口前
+    const nb = [[1, 0], [-1, 0], [0, 1], [0, -1]].map(([dx, dy]) => [door.x + dx, door.y + dy]).find(([x, y]) => map[y] && map[y][x] === 0) || [door.x, door.y];
+    spawnMon('boss', (nb[0] + .5) * T, (nb[1] + .5) * T); const b = mons[mons.length - 1]; b.hp = b.maxHp = lv === 9 ? 900 : 480; b.aggro = false; }
+  map[door.y][door.x] = 2; door.open = false;
+  state = 'play'; hud(); pop(lv === 4 || lv === 9 ? `第 ${lv + 1} 關・魔王在出口！` : `第 ${lv + 1} 關`, W / 2, H / 2 - 60, '#ffd166', 24, true);
+}
+function startGame() {
+  initAudio(); pl = newPlayer(); gold = 0; kills = 0; score = 0; chestsOpened = 0;
+  ['menu', 'over', 'shopOv'].forEach(i => document.getElementById(i).hidden = true); startLevel(0);
+}
+function hud() {
+  document.getElementById('hHpT').textContent = `${Math.max(0, Math.ceil(pl.hp))}/${pl.maxHp}`;
+  document.getElementById('hpfill').style.width = clamp(pl.hp / pl.maxHp * 100, 0, 100) + '%';
+  document.getElementById('hLv').textContent = `${lv + 1} / 10`;
+  document.getElementById('hGold').textContent = gold;
+  document.getElementById('hKey').textContent = hasKey ? '✔️' : '✖';
+}
+function pop(s, x, y, col = '#fff', size = 16, screen = false) { texts.push({ s, x, y, t: screen ? 2 : 1, col, size, screen }); }
+
+/* ===== 輸入 ===== */
+const inp = { x: 0, y: 0, atk: false, sk: false };
+const joy = document.getElementById('joy'), knob = document.getElementById('knob'); let joyId = null;
+function joyMove(e) { const r = joy.getBoundingClientRect(), cx = r.left + r.width / 2, cy = r.top + r.height / 2;
+  let dx = e.clientX - cx, dy = e.clientY - cy; const d = Math.hypot(dx, dy), mx = r.width / 2 - 10; if (d > mx) { dx *= mx / d; dy *= mx / d; }
+  knob.style.transform = `translate(${dx}px,${dy}px)`; const k = Math.hypot(dx, dy) / mx; inp.x = k > .15 ? dx / mx : 0; inp.y = k > .15 ? dy / mx : 0; }
+joy.addEventListener('pointerdown', e => { initAudio(); joyId = e.pointerId; try { joy.setPointerCapture(e.pointerId); } catch (er) {} joyMove(e); });
+joy.addEventListener('pointermove', e => { if (e.pointerId === joyId) joyMove(e); });
+const joyEnd = e => { if (e.pointerId !== joyId) return; joyId = null; knob.style.transform = ''; inp.x = inp.y = 0; };
+joy.addEventListener('pointerup', joyEnd); joy.addEventListener('pointercancel', joyEnd);
+function bindBtn(id, key) { const b = document.getElementById(id);
+  b.addEventListener('pointerdown', e => { e.preventDefault(); initAudio(); inp[key] = true; b.classList.add('on'); try { b.setPointerCapture(e.pointerId); } catch (er) {} });
+  const up = () => { inp[key] = false; b.classList.remove('on'); }; b.addEventListener('pointerup', up); b.addEventListener('pointercancel', up); }
+bindBtn('bAtk', 'atk'); bindBtn('bSk', 'sk');
+const keys = {};
+addEventListener('keydown', e => { keys[e.code] = true; if (['Space', 'ArrowUp', 'ArrowDown', 'ArrowLeft', 'ArrowRight'].includes(e.code)) e.preventDefault(); initAudio(); });
+addEventListener('keyup', e => keys[e.code] = false);
+
+/* ===== 戰鬥 ===== */
+function damageMon(m, dmg, fromX, fromY, kb = 140) {
+  m.hp -= dmg; m.hit = .15; m.aggro = true;
+  const a = Math.atan2(m.y - fromY, m.x - fromX); if (m.type !== 'boss') { m.kx = Math.cos(a) * kb; m.ky = Math.sin(a) * kb; }
+  pop(dmg, m.x, m.y - 22, dmg > pl.atk * 1.5 ? '#ffd166' : '#fff', dmg > pl.atk * 1.5 ? 20 : 15);
+  for (let i = 0; i < 6; i++) fx.push({ k: 'blood', x: m.x, y: m.y, vx: rnd(-80, 80), vy: rnd(-80, 80), t: .5, c: m.type === 'skel' ? '#e8e2d0' : m.type === 'bat' ? '#5a2a6a' : '#5f8a3a' });
+  if (m.hp <= 0) {
+    m.dead = true; kills++; score += MT[m.type].pts * (lv + 1); const gg = ri(...MT[m.type].gold); gold += gg; pop(`+${gg} 💰`, m.x, m.y - 6, '#ffd166', 14);
+    fx.push({ k: 'poof', x: m.x, y: m.y, t: .6, r: m.r }); if (m.type === 'boss') { shake = .8; sfx.slam(); pop('魔王被打倒了！', W / 2, H / 2 - 80, '#ffd166', 24, true); }
+    if (Math.random() < .12) fx.push({ k: 'potion', x: m.x, y: m.y, t: 20 });
+  }
+}
+function doAttack() {
+  // 自動朝最近的怪
+  let near = null, nd = 70;
+  for (const m of mons) { const d = Math.hypot(m.x - pl.x, m.y - pl.y); if (d < nd) { nd = d; near = m; } }
+  if (near) pl.face = Math.atan2(near.y - pl.y, near.x - pl.x);
+  pl.swing = .22; pl.atkCd = .34; sfx.swing();
+  let any = false;
+  for (const m of mons) {
+    const d = Math.hypot(m.x - pl.x, m.y - pl.y); if (d > 50 + m.r) continue;
+    let da = Math.abs(((Math.atan2(m.y - pl.y, m.x - pl.x) - pl.face) + Math.PI * 3) % (Math.PI * 2) - Math.PI);
+    if (da < 1.15 || d < m.r + 14) { const crit = Math.random() < .15; damageMon(m, Math.round(pl.atk * rnd(.85, 1.15) * (crit ? 2 : 1)), pl.x, pl.y); any = true; }
+  }
+  if (any) { sfx.hit(); buzz(20); }
+}
+function doSkill() {
+  pl.skCd = pl.skMax; sfx.fire(); buzz(40); fx.push({ k: 'ring', x: pl.x, y: pl.y, t: .55 });
+  for (const m of mons) if (Math.hypot(m.x - pl.x, m.y - pl.y) < 95 + m.r) damageMon(m, Math.round(pl.atk * 1.6), pl.x, pl.y, 260);
+}
+function hurtPlayer(d, fromX, fromY) {
+  if (pl.inv > 0 || state !== 'play') return;
+  pl.hp -= d; pl.inv = .7; shake = .3; sfx.hurt(); buzz(60); pop(`-${d}`, pl.x, pl.y - 24, '#ff6b6b', 18);
+  const a = Math.atan2(pl.y - fromY, pl.x - fromX); moveBody(pl, Math.cos(a) * 10, Math.sin(a) * 10);
+  hud(); if (pl.hp <= 0) gameOver(false);
+}
+
+/* ===== 更新 ===== */
+function update(dt) {
+  if (state !== 'play') return;
+  t += dt;
+  // 移動
+  let mx = inp.x, my = inp.y;
+  if (keys.ArrowLeft || keys.KeyA) mx = -1; if (keys.ArrowRight || keys.KeyD) mx = 1; if (keys.ArrowUp || keys.KeyW) my = -1; if (keys.ArrowDown || keys.KeyS) my = 1;
+  const ml = Math.hypot(mx, my); pl.moving = ml > .1;
+  if (pl.moving) { const k = Math.min(1, ml); mx /= ml; my /= ml; moveBody(pl, mx * 135 * k * dt, my * 135 * k * dt); if (pl.swing <= 0) pl.face = Math.atan2(my, mx); pl.walk += dt * 10 * k; }
+  pl.atkCd -= dt; pl.swing -= dt; pl.inv -= dt; pl.skCd = Math.max(0, pl.skCd - dt);
+  if ((inp.atk || keys.KeyJ || keys.Space) && pl.atkCd <= 0) doAttack();
+  if ((inp.sk || keys.KeyK) && pl.skCd <= 0) doSkill();
+  // 已探索區域
+  const ptx = Math.floor(pl.x / T), pty = Math.floor(pl.y / T);
+  for (let y = pty - 3; y <= pty + 3; y++) for (let x = ptx - 3; x <= ptx + 3; x++) if (y >= 0 && x >= 0 && y < MH && x < MW) seen[y][x] = true;
+  // 寶箱
+  for (const c of chests) if (!c.open && Math.hypot((c.x + .5) * T - pl.x, (c.y + .5) * T - pl.y) < 28) openChest(c);
+  // 藥水
+  for (const f of fx) if (f.k === 'potion' && Math.hypot(f.x - pl.x, f.y - pl.y) < 22) { f.t = 0; pl.hp = Math.min(pl.maxHp, pl.hp + 30); pop('+30 ❤️', pl.x, pl.y - 26, '#7ee787', 16); tone(700, .15, .08, 'triangle'); hud(); }
+  // 出口
+  if (Math.hypot((door.x + .5) * T - pl.x, (door.y + .5) * T - pl.y) < 42) {
+    const boss = mons.find(m => m.type === 'boss');
+    if (!hasKey) { if (!door.msg) { pop('需要鑰匙！去找金色寶箱', pl.x, pl.y - 30, '#ffb3b3', 15); door.msg = 1.5; } }
+    else if (boss) { if (!door.msg) { pop('先打倒魔王！', pl.x, pl.y - 30, '#ffb3b3', 15); door.msg = 1.5; } }
+    else if (!door.open) { door.open = true; map[door.y][door.x] = 0; sfx.door(); }
+    else if (Math.hypot((door.x + .5) * T - pl.x, (door.y + .5) * T - pl.y) < 14) return levelClear();
+  }
+  if (door.msg) door.msg = Math.max(0, door.msg - dt);
+  // 追蹤路線（流場）
+  flowT -= dt; if (flowT <= 0 || !flow) { flow = bfs(ptx, pty, 16); flowT = .25; }
+  // 怪物
+  for (const m of mons) {
+    if (m.dead) continue;
+    m.hit -= dt; m.ph += dt; m.cd -= dt;
+    if (m.kx || m.ky) { moveBody(m, m.kx * dt, m.ky * dt); m.kx *= .82; m.ky *= .82; if (Math.abs(m.kx) + Math.abs(m.ky) < 5) m.kx = m.ky = 0; }
+    const tx = Math.floor(m.x / T), ty = Math.floor(m.y / T), fd = flow[ty] ? flow[ty][tx] : -1, dist = Math.hypot(pl.x - m.x, pl.y - m.y);
+    const aggroR = m.type === 'boss' ? 6 : 8;
+    if (fd >= 0 && fd <= aggroR) m.aggro = true; if (fd < 0 || fd > 14) m.aggro = m.type === 'boss' ? m.aggro && fd >= 0 : false;
+    let vx = 0, vy = 0;
+    if (m.aggro) {
+      let gx = pl.x, gy = pl.y;
+      if (fd > 0) { let bd = fd; for (const [dx, dy] of [[1, 0], [-1, 0], [0, 1], [0, -1]]) { const v = flow[ty + dy] && flow[ty + dy][tx + dx]; if (v >= 0 && v < bd) { bd = v; gx = (tx + dx + .5) * T; gy = (ty + dy + .5) * T; } } }
+      const a = Math.atan2(gy - m.y, gx - m.x);
+      vx = Math.cos(a); vy = Math.sin(a);
+      if (m.type === 'skel') {   // 骷髏：保持距離放箭
+        const see = dist < 230 && los(m.x, m.y, pl.x, pl.y);
+        if (see && dist < 120) { const b = Math.atan2(m.y - pl.y, m.x - pl.x); vx = Math.cos(b); vy = Math.sin(b); }
+        else if (see) { vx = vy = 0; }
+        if (see && m.cd <= 0) { const b = Math.atan2(pl.y - m.y, pl.x - m.x); shots.push({ x: m.x, y: m.y, vx: Math.cos(b) * 210, vy: Math.sin(b) * 210, dmg: m.dmg, t: 2 }); m.cd = rnd(1.6, 2.4); sfx.arrow(); }
+      }
+      if (m.type === 'bat') { vx += Math.cos(m.ph * 7) * .6; vy += Math.sin(m.ph * 9) * .6; }
+      if (m.type === 'boss') {
+        if (!m.slam && m.cd <= 0 && dist < 200) { m.slam = { x: pl.x, y: pl.y, t: 1.1 }; m.cd = 3.8; }
+        m.summon -= dt; if (m.summon <= 0) { m.summon = 9; for (let i = 0; i < 2; i++) spawnMon('bat', m.x + rnd(-20, 20), m.y + rnd(-20, 20)); mons[mons.length - 1].aggro = mons[mons.length - 2].aggro = true; sfx.groan(); }
+      }
+      if (m.type === 'zombie' && Math.random() < dt * .15) sfx.groan();
+    } else { vx = Math.cos(m.ph * .5 + m.r) * .3; vy = Math.sin(m.ph * .4) * .3; }
+    if (m.slam) { m.slam.t -= dt; vx = vy = 0; if (m.slam.t <= 0) { fx.push({ k: 'quake', x: m.slam.x, y: m.slam.y, t: .5 }); shake = .5; sfx.slam(); if (Math.hypot(pl.x - m.slam.x, pl.y - m.slam.y) < 80) hurtPlayer(m.dmg + 8, m.slam.x, m.slam.y); m.slam = null; } }
+    if (vx) m.face = vx > 0 ? 1 : -1;
+    moveBody(m, vx * m.spd * dt, vy * m.spd * dt);
+    if (dist < m.r + pl.r + 2 && m.cd <= 0 && m.type !== 'skel') { hurtPlayer(m.dmg, m.x, m.y); m.cd = 1; }
+    else if (dist < m.r + pl.r + 2 && m.type === 'skel' && m.cd <= 0) { hurtPlayer(Math.round(m.dmg * .6), m.x, m.y); m.cd = 1.2; }
+  }
+  // 怪物互相推開
+  for (let i = 0; i < mons.length; i++) for (let j = i + 1; j < mons.length; j++) { const a = mons[i], b = mons[j]; if (a.dead || b.dead) continue;
+    const dx = b.x - a.x, dy = b.y - a.y, d = Math.hypot(dx, dy), md = a.r + b.r; if (d > 0 && d < md) { const p = (md - d) / 2 / d; moveBody(a, -dx * p, -dy * p); moveBody(b, dx * p, dy * p); } }
+  mons = mons.filter(m => !m.dead);
+  // 箭
+  for (const s of shots) { s.x += s.vx * dt; s.y += s.vy * dt; s.t -= dt;
+    if (solid(s.x, s.y)) s.t = 0; else if (Math.hypot(s.x - pl.x, s.y - pl.y) < pl.r + 4) { hurtPlayer(s.dmg, s.x - s.vx, s.y - s.vy); s.t = 0; } }
+  shots = shots.filter(s => s.t > 0);
+  for (const f of fx) { f.t -= dt; if (f.k === 'blood') { f.x += f.vx * dt; f.y += f.vy * dt; f.vx *= .9; f.vy *= .9; } }
+  fx = fx.filter(f => f.t > 0);
+  for (const x of texts) { x.t -= dt; x.y -= (x.screen ? 10 : 30) * dt; } texts = texts.filter(x => x.t > 0);
+  shake = Math.max(0, shake - dt);
+  skUI();
+}
+function openChest(c) {
+  c.open = true; chestsOpened++; c.ot = t; sfx.chest(); buzz(30);
+  const cx = (c.x + .5) * T, cy = (c.y + .5) * T;
+  for (let i = 0; i < 14; i++) fx.push({ k: 'spark', x: cx, y: cy, vx: rnd(-1, 1), vy: rnd(-1, 1), t: rnd(.5, 1) });
+  if (c.key) { hasKey = true; sfx.key(); pop('🗝️ 拿到鑰匙了！快去出口', W / 2, H / 2 - 90, '#ffd166', 20, true); hud(); return; }
+  const r = Math.random();
+  if (r < .45) { const g = ri(10, 25) + lv * 3; gold += g; pop(`💰 +${g}`, cx, cy - 24, '#ffd166', 18); }
+  else if (r < .75) { pl.hp = Math.min(pl.maxHp, pl.hp + 40); pop('🧪 補血 +40', cx, cy - 24, '#7ee787', 17); }
+  else if (r < .9) { pl.atk += 4; pl.wpn = Math.min(3, pl.wpn + 1); pop('⚔️ 更強的劍！攻擊 +4', cx, cy - 24, '#9ad0ff', 16); }
+  else { pl.maxHp += 15; pl.hp += 15; pop('❤️ 血量上限 +15', cx, cy - 24, '#ff9aa2', 16); }
+  score += 20; hud();
+}
+function skUI() {
+  const el = document.getElementById('skCd');
+  if (pl.skCd > 0) { el.hidden = false; el.textContent = Math.ceil(pl.skCd); } else el.hidden = true;
+}
+function levelClear() {
+  score += 200 * (lv + 1) + Math.round(pl.hp); sfx.door();
+  saveBest(lv + 1);
+  if (lv === 9) return gameOver(true);
+  state = 'shop';
+  document.getElementById('sTitle').textContent = `🎉 第 ${lv + 1} 關過關！`;
+  shopUI(); document.getElementById('shopOv').hidden = false;
+}
+function shopUI() {
+  document.getElementById('sGold').textContent = gold;
+  [['buyHp', 30], ['buyAtk', 40], ['buyHeal', 20], ['buySk', 50]].forEach(([id, c]) => document.getElementById(id).disabled = gold < c || (id === 'buyHeal' && pl.hp >= pl.maxHp) || (id === 'buySk' && pl.skMax <= 4));
+}
+function buy(c, fn) { if (gold < c) return; gold -= c; fn(); tone(880, .1, .08, 'triangle'); shopUI(); hud(); }
+document.getElementById('buyHp').onclick = () => buy(30, () => { pl.maxHp += 25; pl.hp += 25; });
+document.getElementById('buyAtk').onclick = () => buy(40, () => { pl.atk += 5; pl.wpn = Math.min(3, pl.wpn + 1); });
+document.getElementById('buyHeal').onclick = () => buy(20, () => { pl.hp = pl.maxHp; });
+document.getElementById('buySk').onclick = () => buy(50, () => { pl.skMax -= 1; });
+document.getElementById('next').onclick = () => { document.getElementById('shopOv').hidden = true; pl.hp = Math.min(pl.maxHp, pl.hp + 15); startLevel(lv + 1); };
+function saveBest(l) { if (l > best.lv || score > best.sc) { best.lv = Math.max(best.lv, l); best.sc = Math.max(best.sc, score); try { localStorage.setItem('zmBest', JSON.stringify(best)); } catch (e) {} } }
+function gameOver(win) {
+  state = 'over'; saveBest(win ? 10 : lv); if (!win) sfx.die();
+  document.getElementById('oTitle').textContent = win ? '🏆 成功逃出迷宮！' : '💀 被怪物打倒了';
+  document.getElementById('oMsg').textContent = win ? '10 關全破，你是真正的勇者！' : `在第 ${lv + 1} 關倒下`;
+  document.getElementById('oStats').innerHTML = `<div>分數<b>${score}</b></div><div>最高分<b>${best.sc}</b></div><div>打倒怪物<b>${kills}</b></div><div>打開寶箱<b>${chestsOpened}</b></div><div>金幣<b>${gold}</b></div><div>攻擊力<b>${pl.atk}</b></div>`;
+  document.getElementById('over').hidden = false;
+}
+document.getElementById('start').onclick = startGame; document.getElementById('again').onclick = startGame;
+
+/* ===== 圖塊（預先畫好：地板、牆） ===== */
+function mkTile(fn) { const c = document.createElement('canvas'); c.width = c.height = T * 2; const g = c.getContext('2d'); g.scale(2, 2); fn(g); return c; }
+const FLOORS = [0, 1, 2, 3].map(v => mkTile(g => {
+  g.fillStyle = '#2b2630'; g.fillRect(0, 0, T, T);
+  const s = [[0, 0, 20, 20], [20, 0, 20, 20], [0, 20, 20, 20], [20, 20, 20, 20]];
+  for (const [x, y, w, h] of s) { const l = 22 + Math.random() * 10 + v * 1.5;
+    const gr = g.createLinearGradient(x, y, x + w, y + h); gr.addColorStop(0, `hsl(260,8%,${l + 4}%)`); gr.addColorStop(1, `hsl(260,8%,${l - 3}%)`);
+    g.fillStyle = gr; g.beginPath(); g.roundRect(x + 1, y + 1, w - 2, h - 2, 3); g.fill();
+    g.fillStyle = 'rgba(255,255,255,.05)'; g.fillRect(x + 2, y + 2, w - 4, 2); }
+  for (let i = 0; i < 30; i++) { g.fillStyle = Math.random() < .5 ? 'rgba(0,0,0,.18)' : 'rgba(255,255,255,.05)'; g.fillRect(Math.random() * T, Math.random() * T, 1, 1); }
+  if (v === 3) { g.fillStyle = 'rgba(60,90,40,.35)'; for (let i = 0; i < 6; i++) { g.beginPath(); g.arc(rnd(4, 36), rnd(4, 36), rnd(2, 4), 0, 7); g.fill(); } }   // 青苔
+}));
+const WALL_TOP = mkTile(g => {
+  const gr = g.createLinearGradient(0, 0, 0, T); gr.addColorStop(0, '#5b5266'); gr.addColorStop(1, '#463e50'); g.fillStyle = gr; g.fillRect(0, 0, T, T);
+  g.strokeStyle = 'rgba(0,0,0,.35)'; g.lineWidth = 1;
+  for (let r = 0; r < 4; r++) { const y = r * 10; g.beginPath(); g.moveTo(0, y + .5); g.lineTo(T, y + .5); g.stroke();
+    for (let x = (r % 2) * 10; x < T; x += 20) { g.beginPath(); g.moveTo(x + .5, y); g.lineTo(x + .5, y + 10); g.stroke(); } }
+  g.fillStyle = 'rgba(255,255,255,.07)'; for (let r = 0; r < 4; r++) g.fillRect(0, r * 10 + 1, T, 1.5);
+});
+const WALL_FACE = mkTile(g => {   // 牆的正面（往下看到的一面）
+  const gr = g.createLinearGradient(0, 0, 0, T); gr.addColorStop(0, '#3a3242'); gr.addColorStop(1, '#221d28'); g.fillStyle = gr; g.fillRect(0, 0, T, T);
+  g.strokeStyle = 'rgba(0,0,0,.45)';
+  for (let r = 0; r < 3; r++) { const y = r * 13; g.beginPath(); g.moveTo(0, y + .5); g.lineTo(T, y + .5); g.stroke();
+    for (let x = (r % 2) * 13; x < T; x += 26) { g.beginPath(); g.moveTo(x + .5, y); g.lineTo(x + .5, y + 13); g.stroke(); } }
+  g.fillStyle = 'rgba(255,255,255,.05)'; for (let r = 0; r < 3; r++) g.fillRect(0, r * 13 + 1, T, 1.5);
+  const sh = g.createLinearGradient(0, T - 8, 0, T); sh.addColorStop(0, 'rgba(0,0,0,0)'); sh.addColorStop(1, 'rgba(0,0,0,.5)'); g.fillStyle = sh; g.fillRect(0, T - 8, T, 8);
+});
+const FH = 12;   // 牆正面高度
+
+/* ===== 角色繪製 ===== */
+function shadow(x, y, r) { ctx.fillStyle = 'rgba(0,0,0,.35)'; ctx.beginPath(); ctx.ellipse(x, y + r * .8, r, r * .35, 0, 0, Math.PI * 2); ctx.fill(); }
+const WPN = ['#c9ced6', '#9ad0ff', '#c58cff', '#ffd166'];
+function drawHero() {
+  const x = pl.x, y = pl.y, bob = pl.moving ? Math.sin(pl.walk) * 1.5 : 0, fx2 = Math.cos(pl.face) >= 0 ? 1 : -1;
+  if (pl.inv > 0 && Math.floor(pl.inv * 20) % 2) ctx.globalAlpha = .5;
+  shadow(x, y, 12);
+  ctx.save(); ctx.translate(x, y + bob);
+  // 披風
+  const cp = ctx.createLinearGradient(0, -6, 0, 14); cp.addColorStop(0, '#b3262b'); cp.addColorStop(1, '#6d1015');
+  ctx.fillStyle = cp; ctx.beginPath(); ctx.moveTo(-9, -6); ctx.quadraticCurveTo(-13 - Math.sin(pl.walk) * 2, 8, -10, 14); ctx.lineTo(10, 14); ctx.quadraticCurveTo(13 + Math.sin(pl.walk) * 2, 8, 9, -6); ctx.fill();
+  // 腳
+  const st = pl.moving ? Math.sin(pl.walk) * 3 : 0;
+  ctx.fillStyle = '#3b2a1e'; ctx.beginPath(); ctx.roundRect(-7, 9 + st, 5, 6, 2); ctx.roundRect(2, 9 - st, 5, 6, 2); ctx.fill();
+  // 身體鎧甲
+  const ar = ctx.createLinearGradient(-9, 0, 9, 0); ar.addColorStop(0, '#6c7480'); ar.addColorStop(.4, '#c9d0da'); ar.addColorStop(1, '#5a616c');
+  ctx.fillStyle = ar; ctx.beginPath(); ctx.roundRect(-8, -5, 16, 15, 4); ctx.fill(); ctx.strokeStyle = '#2e3238'; ctx.lineWidth = 1; ctx.stroke();
+  ctx.fillStyle = '#8a5a2b'; ctx.fillRect(-8, 5, 16, 3); ctx.fillStyle = '#ffd166'; ctx.fillRect(-1.5, 5, 3, 3);
+  // 盾
+  ctx.save(); ctx.translate(-fx2 * 9, 2);
+  const sg = ctx.createLinearGradient(-5, -6, 5, 6); sg.addColorStop(0, '#2f5fa8'); sg.addColorStop(1, '#173360');
+  ctx.fillStyle = sg; ctx.beginPath(); ctx.moveTo(-5, -6); ctx.lineTo(5, -6); ctx.lineTo(5, 2); ctx.quadraticCurveTo(0, 9, -5, 2); ctx.closePath(); ctx.fill();
+  ctx.strokeStyle = '#d9b44a'; ctx.lineWidth = 1.2; ctx.stroke(); ctx.fillStyle = '#d9b44a'; ctx.fillRect(-.8, -4, 1.6, 8); ctx.fillRect(-3.5, -1.5, 7, 1.6);
+  ctx.restore();
+  // 頭盔
+  const hg = ctx.createRadialGradient(-3, -15, 1, 0, -12, 10); hg.addColorStop(0, '#eef2f7'); hg.addColorStop(1, '#6b737e');
+  ctx.fillStyle = hg; ctx.beginPath(); ctx.arc(0, -12, 8.5, 0, Math.PI * 2); ctx.fill(); ctx.strokeStyle = '#2e3238'; ctx.stroke();
+  ctx.fillStyle = '#1a1c20'; ctx.fillRect(-6 + fx2 * 1.5, -13, 12, 3);   // 面罩縫
+  ctx.fillStyle = '#ffd166'; ctx.beginPath(); ctx.moveTo(0, -21); ctx.quadraticCurveTo(fx2 * -8, -26, fx2 * -12, -22); ctx.quadraticCurveTo(fx2 * -6, -22, 0, -18); ctx.fill();   // 羽飾
+  ctx.restore();
+  // 劍（揮砍弧線）
+  const sw = pl.swing > 0 ? 1 - pl.swing / .22 : 0, ang = pl.face + (pl.swing > 0 ? lerp(-1.3, 1.3, sw) : .9);
+  ctx.save(); ctx.translate(x, y + bob - 2); ctx.rotate(ang);
+  ctx.fillStyle = '#6b4423'; ctx.fillRect(6, -1.8, 6, 3.6); ctx.fillStyle = '#d9b44a'; ctx.fillRect(11, -5, 2.5, 10);
+  const bl = ctx.createLinearGradient(0, -3, 0, 3); bl.addColorStop(0, '#fff'); bl.addColorStop(.5, WPN[pl.wpn]); bl.addColorStop(1, '#6b737e');
+  ctx.fillStyle = bl; ctx.beginPath(); ctx.moveTo(13.5, -2.6); ctx.lineTo(33, -1.5); ctx.lineTo(36, 0); ctx.lineTo(33, 1.5); ctx.lineTo(13.5, 2.6); ctx.closePath(); ctx.fill();
+  ctx.restore();
+  if (pl.swing > 0) { ctx.strokeStyle = `rgba(255,255,255,${pl.swing / .22 * .7})`; ctx.lineWidth = 6; ctx.lineCap = 'round';
+    ctx.beginPath(); ctx.arc(x, y - 2, 34, pl.face - 1.3, pl.face - 1.3 + sw * 2.6); ctx.stroke(); }
+  ctx.globalAlpha = 1;
+}
+function drawZombie(m) {
+  const x = m.x, y = m.y, w = Math.sin(m.ph * 5) * 2, f = m.face;
+  shadow(x, y, 12); ctx.save(); ctx.translate(x, y); ctx.scale(f, 1);
+  ctx.fillStyle = '#3d4a2a'; ctx.beginPath(); ctx.roundRect(-6, 8 + w, 5, 7, 2); ctx.roundRect(1, 8 - w, 5, 7, 2); ctx.fill();   // 腳
+  const cl = ctx.createLinearGradient(-9, 0, 9, 0); cl.addColorStop(0, '#3c4f6b'); cl.addColorStop(.5, '#5d7393'); cl.addColorStop(1, '#2f3e55');
+  ctx.fillStyle = cl; ctx.beginPath(); ctx.moveTo(-9, -5); ctx.lineTo(9, -5); ctx.lineTo(8, 10); ctx.lineTo(4, 7); ctx.lineTo(1, 11); ctx.lineTo(-3, 8); ctx.lineTo(-8, 10); ctx.closePath(); ctx.fill();   // 破衣
+  ctx.fillStyle = 'rgba(120,20,20,.6)'; ctx.beginPath(); ctx.arc(-3, 2, 2.5, 0, 7); ctx.fill();
+  // 手往前伸
+  ctx.fillStyle = '#7fa35a'; ctx.beginPath(); ctx.roundRect(4, -4 + w * .5, 14, 4.5, 2); ctx.roundRect(4, 1 - w * .5, 13, 4.5, 2); ctx.fill();
+  ctx.fillStyle = '#6a8c48'; ctx.beginPath(); ctx.arc(18, -2 + w * .5, 3, 0, 7); ctx.arc(17, 3 - w * .5, 3, 0, 7); ctx.fill();
+  // 頭
+  const hg = ctx.createRadialGradient(-2, -14, 1, 0, -12, 10); hg.addColorStop(0, '#a6c97d'); hg.addColorStop(1, '#55743a');
+  ctx.fillStyle = hg; ctx.beginPath(); ctx.ellipse(1, -12, 8, 8.5, 0, 0, Math.PI * 2); ctx.fill(); ctx.strokeStyle = '#2c3d1d'; ctx.lineWidth = 1; ctx.stroke();
+  ctx.fillStyle = '#2a1f1a'; ctx.beginPath(); ctx.moveTo(-6, -17); ctx.lineTo(-2, -21); ctx.lineTo(1, -18); ctx.lineTo(4, -21); ctx.lineTo(7, -16); ctx.quadraticCurveTo(1, -19, -6, -17); ctx.fill();   // 稀疏頭髮
+  ctx.fillStyle = '#ffef7a'; ctx.shadowColor = '#ffef7a'; ctx.shadowBlur = 6; ctx.beginPath(); ctx.arc(3, -13, 1.8, 0, 7); ctx.arc(7, -12.5, 1.5, 0, 7); ctx.fill(); ctx.shadowBlur = 0;
+  ctx.strokeStyle = '#2c1a12'; ctx.lineWidth = 1.2; ctx.beginPath(); ctx.moveTo(2, -7); ctx.lineTo(4, -8); ctx.lineTo(6, -7); ctx.lineTo(8, -8); ctx.stroke();
+  ctx.strokeStyle = '#8b2f2f'; ctx.beginPath(); ctx.moveTo(-4, -14); ctx.lineTo(-1, -9); ctx.stroke();   // 傷疤
+  ctx.restore();
+}
+function drawBat(m) {
+  const x = m.x, y = m.y - 8 + Math.sin(m.ph * 6) * 3, fl = Math.sin(m.ph * 22);
+  shadow(m.x, m.y + 6, 7); ctx.save(); ctx.translate(x, y);
+  ctx.fillStyle = '#3a2148';
+  for (const s of [-1, 1]) { ctx.beginPath(); ctx.moveTo(s * 4, -1); ctx.quadraticCurveTo(s * 12, -10 - fl * 6, s * 19, -4 - fl * 5); ctx.lineTo(s * 15, 0); ctx.lineTo(s * 12, -1 + fl * 2); ctx.lineTo(s * 9, 2); ctx.lineTo(s * 4, 3); ctx.fill(); }
+  const bg = ctx.createRadialGradient(-1, -2, 1, 0, 0, 7); bg.addColorStop(0, '#7a4b8f'); bg.addColorStop(1, '#2a1636');
+  ctx.fillStyle = bg; ctx.beginPath(); ctx.ellipse(0, 0, 5.5, 6.5, 0, 0, Math.PI * 2); ctx.fill();
+  ctx.beginPath(); ctx.moveTo(-4, -4); ctx.lineTo(-3, -9); ctx.lineTo(-1, -5); ctx.moveTo(4, -4); ctx.lineTo(3, -9); ctx.lineTo(1, -5); ctx.fill();
+  ctx.fillStyle = '#ff4d4d'; ctx.shadowColor = '#ff4d4d'; ctx.shadowBlur = 5; ctx.beginPath(); ctx.arc(-2, -1.5, 1.2, 0, 7); ctx.arc(2, -1.5, 1.2, 0, 7); ctx.fill(); ctx.shadowBlur = 0;
+  ctx.fillStyle = '#fff'; ctx.beginPath(); ctx.moveTo(-1.5, 2); ctx.lineTo(-1, 4); ctx.lineTo(-.5, 2); ctx.moveTo(.5, 2); ctx.lineTo(1, 4); ctx.lineTo(1.5, 2); ctx.fill();
+  ctx.restore();
+}
+function drawSkel(m) {
+  const x = m.x, y = m.y, w = Math.sin(m.ph * 6) * 2, a = Math.atan2(pl.y - y, pl.x - x), f = Math.cos(a) >= 0 ? 1 : -1;
+  shadow(x, y, 11); ctx.save(); ctx.translate(x, y);
+  ctx.strokeStyle = '#e8e2d0'; ctx.lineWidth = 2.4; ctx.lineCap = 'round';
+  ctx.beginPath(); ctx.moveTo(-3, 6); ctx.lineTo(-4, 14 + w); ctx.moveTo(3, 6); ctx.lineTo(4, 14 - w); ctx.stroke();   // 腿骨
+  ctx.lineWidth = 2; ctx.beginPath(); ctx.moveTo(0, -6); ctx.lineTo(0, 6); ctx.stroke();   // 脊椎
+  for (let i = 0; i < 3; i++) { ctx.beginPath(); ctx.ellipse(0, -3 + i * 3, 6 - i, 1.3, 0, 0, Math.PI * 2); ctx.stroke(); }   // 肋骨
+  ctx.fillStyle = '#e8e2d0'; ctx.beginPath(); ctx.ellipse(0, 7, 5, 2.5, 0, 0, Math.PI * 2); ctx.fill();   // 骨盆
+  // 弓
+  ctx.save(); ctx.rotate(a); ctx.strokeStyle = '#7a4a22'; ctx.lineWidth = 2.2; ctx.beginPath(); ctx.arc(9, 0, 10, -1.2, 1.2); ctx.stroke();
+  ctx.strokeStyle = '#ddd'; ctx.lineWidth = .7; ctx.beginPath(); ctx.moveTo(9 + Math.cos(-1.2) * 10, Math.sin(-1.2) * 10); ctx.lineTo(m.cd < .5 ? 2 : 9 + Math.cos(1.2) * 10 - 3, 0); ctx.lineTo(9 + Math.cos(1.2) * 10, Math.sin(1.2) * 10); ctx.stroke();
+  ctx.strokeStyle = '#e8e2d0'; ctx.lineWidth = 2; ctx.beginPath(); ctx.moveTo(0, -4); ctx.lineTo(10, 0); ctx.stroke(); ctx.restore();
+  // 頭骨
+  const sg = ctx.createRadialGradient(-2, -15, 1, 0, -12, 9); sg.addColorStop(0, '#fffbea'); sg.addColorStop(1, '#bdb59c');
+  ctx.fillStyle = sg; ctx.beginPath(); ctx.arc(0, -13, 7.5, 0, Math.PI * 2); ctx.fill(); ctx.beginPath(); ctx.roundRect(-4.5, -9, 9, 5, 2); ctx.fill();
+  ctx.fillStyle = '#1a1410'; ctx.beginPath(); ctx.ellipse(-2.8 + f, -13, 2.2, 2.6, 0, 0, 7); ctx.ellipse(2.8 + f, -13, 2.2, 2.6, 0, 0, 7); ctx.fill();
+  ctx.fillStyle = '#ff5b3b'; ctx.beginPath(); ctx.arc(-2.8 + f, -13, .9, 0, 7); ctx.arc(2.8 + f, -13, .9, 0, 7); ctx.fill();
+  ctx.fillStyle = '#1a1410'; ctx.beginPath(); ctx.moveTo(f, -10.5); ctx.lineTo(f - 1.2, -8.5); ctx.lineTo(f + 1.2, -8.5); ctx.fill();
+  ctx.strokeStyle = '#6b6352'; ctx.lineWidth = .6; for (let i = -3; i <= 3; i += 1.5) { ctx.beginPath(); ctx.moveTo(i, -6.5); ctx.lineTo(i, -4.5); ctx.stroke(); }
+  ctx.restore();
+}
+function drawBoss(m) {
+  const x = m.x, y = m.y, br = Math.sin(m.ph * 3) * 1.5, f = pl.x >= x ? 1 : -1;
+  if (m.slam) { const k = 1 - m.slam.t / 1.1; ctx.fillStyle = `rgba(255,40,40,${.15 + k * .25})`; ctx.strokeStyle = `rgba(255,80,80,${.5 + k * .5})`; ctx.lineWidth = 2;
+    ctx.beginPath(); ctx.arc(m.slam.x, m.slam.y, 80, 0, Math.PI * 2); ctx.fill(); ctx.stroke(); ctx.beginPath(); ctx.arc(m.slam.x, m.slam.y, 80 * k, 0, Math.PI * 2); ctx.stroke(); }
+  shadow(x, y, 26); ctx.save(); ctx.translate(x, y); ctx.scale(f, 1);
+  const sk = ctx.createLinearGradient(-26, 0, 26, 0); sk.addColorStop(0, '#5c1f1f'); sk.addColorStop(.45, '#a83a32'); sk.addColorStop(1, '#4a1717');
+  ctx.fillStyle = '#3a1410'; ctx.beginPath(); ctx.roundRect(-16, 16, 12, 12, 4); ctx.roundRect(4, 16, 12, 12, 4); ctx.fill();   // 腳
+  ctx.fillStyle = sk; ctx.beginPath(); ctx.ellipse(0, 4 + br, 24, 20, 0, 0, Math.PI * 2); ctx.fill(); ctx.strokeStyle = '#2a0b08'; ctx.lineWidth = 1.5; ctx.stroke();   // 身體
+  ctx.strokeStyle = 'rgba(0,0,0,.3)'; ctx.lineWidth = 1.5; ctx.beginPath(); ctx.moveTo(-8, 0); ctx.quadraticCurveTo(0, 6, 8, 0); ctx.moveTo(-6, 10); ctx.quadraticCurveTo(0, 14, 6, 10); ctx.stroke();   // 腹肌
+  ctx.fillStyle = '#5a3b1f'; ctx.fillRect(-22, 12, 44, 5); ctx.fillStyle = '#c9a227'; ctx.fillRect(-4, 11, 8, 7);   // 腰帶
+  // 狼牙棒
+  ctx.save(); ctx.translate(22, 0); ctx.rotate(m.slam ? -1.6 + (1 - m.slam.t / 1.1) * .4 : -.4 + Math.sin(m.ph * 2) * .1);
+  ctx.fillStyle = '#6b4423'; ctx.fillRect(-3, -30, 6, 34); ctx.fillStyle = '#5a5a63'; ctx.beginPath(); ctx.ellipse(0, -34, 8, 11, 0, 0, 7); ctx.fill();
+  ctx.fillStyle = '#c9ced6'; for (let i = 0; i < 6; i++) { const a = i / 6 * Math.PI * 2; ctx.beginPath(); ctx.moveTo(Math.cos(a) * 7, -34 + Math.sin(a) * 9); ctx.lineTo(Math.cos(a) * 12, -34 + Math.sin(a) * 14); ctx.lineTo(Math.cos(a + .3) * 7, -34 + Math.sin(a + .3) * 9); ctx.fill(); }
+  ctx.restore();
+  ctx.fillStyle = '#8e2f28'; ctx.beginPath(); ctx.ellipse(18, 2, 7, 10, -.4, 0, 7); ctx.ellipse(-20, 4, 7, 10, .4, 0, 7); ctx.fill();   // 手臂
+  // 頭與角
+  const hg = ctx.createRadialGradient(-4, -24, 2, 0, -20, 16); hg.addColorStop(0, '#d4584e'); hg.addColorStop(1, '#6b2420');
+  ctx.fillStyle = '#e8dcc0'; for (const s of [-1, 1]) { ctx.beginPath(); ctx.moveTo(s * 8, -28); ctx.quadraticCurveTo(s * 20, -36, s * 16, -46); ctx.quadraticCurveTo(s * 13, -36, s * 4, -32); ctx.fill(); }
+  ctx.fillStyle = hg; ctx.beginPath(); ctx.ellipse(0, -21 + br, 14, 12, 0, 0, Math.PI * 2); ctx.fill(); ctx.strokeStyle = '#2a0b08'; ctx.stroke();
+  ctx.fillStyle = '#ffd400'; ctx.shadowColor = '#ff3b1f'; ctx.shadowBlur = 10; ctx.beginPath(); ctx.moveTo(-8, -24); ctx.lineTo(-2, -22); ctx.lineTo(-7, -20); ctx.fill(); ctx.beginPath(); ctx.moveTo(8, -24); ctx.lineTo(2, -22); ctx.lineTo(7, -20); ctx.fill(); ctx.shadowBlur = 0;
+  ctx.fillStyle = '#2a0b08'; ctx.beginPath(); ctx.roundRect(-7, -16, 14, 5, 2); ctx.fill(); ctx.fillStyle = '#fff'; ctx.beginPath(); ctx.moveTo(-6, -16); ctx.lineTo(-4.5, -12); ctx.lineTo(-3, -16); ctx.moveTo(3, -16); ctx.lineTo(4.5, -12); ctx.lineTo(6, -16); ctx.fill();
+  ctx.restore();
+}
+function drawChest(c) {
+  const x = c.x * T + 6, y = c.y * T + 10, gold2 = c.key;
+  ctx.fillStyle = 'rgba(0,0,0,.35)'; ctx.beginPath(); ctx.ellipse(x + 14, y + 22, 15, 4, 0, 0, 7); ctx.fill();
+  if (gold2 && !c.open) { ctx.fillStyle = `rgba(255,210,80,${.25 + Math.sin(t * 4) * .12})`; ctx.beginPath(); ctx.arc(x + 14, y + 10, 22, 0, 7); ctx.fill(); }
+  const body = ctx.createLinearGradient(0, y + 8, 0, y + 22); body.addColorStop(0, gold2 ? '#d9a521' : '#8a5a2b'); body.addColorStop(1, gold2 ? '#8c6410' : '#4e3016');
+  ctx.fillStyle = body; ctx.beginPath(); ctx.roundRect(x, y + 8, 28, 14, 2); ctx.fill(); ctx.strokeStyle = '#2a1a0b'; ctx.lineWidth = 1; ctx.stroke();
+  ctx.fillStyle = gold2 ? '#fff1b8' : '#c9a227'; ctx.fillRect(x + 4, y + 8, 3, 14); ctx.fillRect(x + 21, y + 8, 3, 14);
+  if (c.open) {
+    ctx.fillStyle = '#1a0f05'; ctx.fillRect(x + 1, y + 6, 26, 3);
+    ctx.fillStyle = body; ctx.beginPath(); ctx.roundRect(x, y - 6, 28, 10, 3); ctx.fill(); ctx.stroke();
+  } else {
+    const lid = ctx.createLinearGradient(0, y, 0, y + 9); lid.addColorStop(0, gold2 ? '#ffe08a' : '#a8743c'); lid.addColorStop(1, gold2 ? '#c99415' : '#6d4520');
+    ctx.fillStyle = lid; ctx.beginPath(); ctx.moveTo(x, y + 9); ctx.lineTo(x, y + 4); ctx.quadraticCurveTo(x + 14, y - 3, x + 28, y + 4); ctx.lineTo(x + 28, y + 9); ctx.closePath(); ctx.fill(); ctx.stroke();
+    ctx.fillStyle = '#ffd166'; ctx.beginPath(); ctx.roundRect(x + 11, y + 7, 6, 6, 1); ctx.fill(); ctx.fillStyle = '#2a1a0b'; ctx.fillRect(x + 13.3, y + 9, 1.4, 2.5);
+  }
+}
+function drawDoor() {
+  const x = door.x * T, y = door.y * T;
+  ctx.fillStyle = '#17131c'; ctx.fillRect(x, y, T, T);
+  if (!door.open) {
+    const g = ctx.createLinearGradient(x, 0, x + T, 0); g.addColorStop(0, '#4a2c14'); g.addColorStop(.5, '#7a4a22'); g.addColorStop(1, '#4a2c14');
+    ctx.fillStyle = g; ctx.beginPath(); ctx.roundRect(x + 3, y + 2, T - 6, T - 3, [14, 14, 2, 2]); ctx.fill();
+    ctx.strokeStyle = '#2a170a'; ctx.lineWidth = 1; for (let i = 1; i < 4; i++) { ctx.beginPath(); ctx.moveTo(x + 3 + i * 8.5, y + 4); ctx.lineTo(x + 3 + i * 8.5, y + T - 2); ctx.stroke(); }
+    ctx.fillStyle = '#6b737e'; ctx.fillRect(x + 3, y + 12, T - 6, 3); ctx.fillRect(x + 3, y + 28, T - 6, 3);
+    ctx.fillStyle = hasKey ? '#ffd166' : '#9aa0a8'; ctx.beginPath(); ctx.arc(x + T / 2, y + 21, 4, 0, 7); ctx.fill(); ctx.fillStyle = '#1a1a1a'; ctx.fillRect(x + T / 2 - 1, y + 21, 2, 4);
+  } else {
+    const g = ctx.createRadialGradient(x + T / 2, y + T / 2, 2, x + T / 2, y + T / 2, T * .7); g.addColorStop(0, `rgba(160,255,200,${.8 + Math.sin(t * 5) * .2})`); g.addColorStop(1, 'rgba(60,180,120,0)');
+    ctx.fillStyle = g; ctx.fillRect(x - 10, y - 10, T + 20, T + 20);
+    ctx.fillStyle = '#fff'; ctx.font = 'bold 11px system-ui'; ctx.textAlign = 'center'; ctx.fillText('出口', x + T / 2, y + T / 2 + 4);
+  }
+}
+function drawDecor(d) {
+  const x = d.x * T + d.ox, y = d.y * T + d.oy;
+  ctx.save(); ctx.translate(x, y); ctx.rotate(d.r);
+  if (d.k === 'bone') { ctx.strokeStyle = '#cfc6ad'; ctx.lineWidth = 2; ctx.beginPath(); ctx.moveTo(-5, 0); ctx.lineTo(5, 0); ctx.stroke(); ctx.fillStyle = '#cfc6ad'; for (const s of [-1, 1]) { ctx.beginPath(); ctx.arc(s * 6, -1.2, 1.6, 0, 7); ctx.arc(s * 6, 1.2, 1.6, 0, 7); ctx.fill(); } }
+  else if (d.k === 'skull') { ctx.fillStyle = '#cfc6ad'; ctx.beginPath(); ctx.arc(0, 0, 4.5, 0, 7); ctx.fill(); ctx.fillStyle = '#2a2420'; ctx.beginPath(); ctx.arc(-1.6, 0, 1.2, 0, 7); ctx.arc(1.6, 0, 1.2, 0, 7); ctx.fill(); }
+  else if (d.k === 'crack') { ctx.strokeStyle = 'rgba(0,0,0,.4)'; ctx.lineWidth = 1; ctx.beginPath(); ctx.moveTo(-8, -3); ctx.lineTo(-2, 0); ctx.lineTo(1, -4); ctx.lineTo(7, 2); ctx.moveTo(-2, 0); ctx.lineTo(0, 5); ctx.stroke(); }
+  else if (d.k === 'blood') { ctx.fillStyle = 'rgba(110,15,20,.45)'; ctx.beginPath(); ctx.ellipse(0, 0, 7, 4, 0, 0, 7); ctx.fill(); ctx.beginPath(); ctx.arc(8, 2, 1.5, 0, 7); ctx.fill(); }
+  else { ctx.strokeStyle = 'rgba(220,220,230,.25)'; ctx.lineWidth = .6; for (let i = 0; i < 6; i++) { ctx.beginPath(); ctx.moveTo(0, 0); ctx.lineTo(Math.cos(i) * 9, Math.sin(i) * 9); ctx.stroke(); } ctx.beginPath(); ctx.arc(0, 0, 4, 0, 7); ctx.arc(0, 0, 7, 0, 7); ctx.stroke(); }
+  ctx.restore();
+}
+
+/* ===== 主畫面 ===== */
+let camX = 0, camY = 0;
+function draw() {
+  ctx.setTransform(SC, 0, 0, SC, 0, 0);
+  ctx.fillStyle = '#0d0b10'; ctx.fillRect(0, 0, W, H);
+  if (!map || !pl) return;
+  camX = clamp(pl.x - W / 2, -20, MW * T - W + 20); camY = clamp(pl.y - H / 2, -40, MH * T - H + 20);
+  const sx = shake > 0 ? rnd(-5, 5) * shake : 0, sy = shake > 0 ? rnd(-5, 5) * shake : 0;
+  ctx.save(); ctx.translate(-Math.round(camX) + sx, -Math.round(camY) + sy);
+  const x0 = Math.max(0, Math.floor(camX / T) - 1), x1 = Math.min(MW - 1, Math.floor((camX + W) / T) + 1), y0 = Math.max(0, Math.floor(camY / T) - 1), y1 = Math.min(MH - 1, Math.floor((camY + H) / T) + 1);
+  // 地板
+  for (let y = y0; y <= y1; y++) for (let x = x0; x <= x1; x++) if (map[y][x] !== 1) ctx.drawImage(FLOORS[(x * 7 + y * 13) % 4], x * T, y * T, T, T);
+  for (const d of decor) if (d.x >= x0 && d.x <= x1 && d.y >= y0 && d.y <= y1) drawDecor(d);
+  drawDoor();
+  for (const c of chests) drawChest(c);
+  for (const f of fx) if (f.k === 'potion') { const b = Math.sin(t * 4) * 2; ctx.fillStyle = '#e8f0ff'; ctx.fillRect(f.x - 2, f.y - 12 + b, 4, 4); ctx.fillStyle = '#e04848'; ctx.beginPath(); ctx.arc(f.x, f.y - 4 + b, 6, 0, 7); ctx.fill(); ctx.fillStyle = 'rgba(255,255,255,.6)'; ctx.beginPath(); ctx.arc(f.x - 2, f.y - 6 + b, 1.6, 0, 7); ctx.fill(); }
+  // 依 y 排序：牆、角色
+  const ents = [];
+  for (let y = y0; y <= y1; y++) for (let x = x0; x <= x1; x++) if (map[y][x] === 1) {   // 牆：只佔自己這一格（上方是頂面、下緣是正面），不遮住走道
+    ctx.drawImage(WALL_TOP, x * T, y * T, T, T - FH);
+    if (y + 1 < MH && map[y + 1][x] !== 1) ctx.drawImage(WALL_FACE, x * T, (y + 1) * T - FH, T, FH);
+    else ctx.drawImage(WALL_TOP, 0, (T - FH) * 2, T * 2, FH * 2, x * T, (y + 1) * T - FH, T, FH); }
+  for (const m of mons) ents.push({ y: m.y + m.r, k: 'mon', m });
+  ents.push({ y: pl.y + pl.r, k: 'hero' });
+  ents.sort((a, b) => a.y - b.y);
+  for (const e of ents) {
+    if (e.k === 'hero') drawHero();
+    else { const m = e.m; if (m.hit > 0) ctx.filter = 'brightness(2.2)';
+      ({ zombie: drawZombie, bat: drawBat, skel: drawSkel, boss: drawBoss })[m.type](m); ctx.filter = 'none';
+      if (m.hp < m.maxHp) { const w = m.type === 'boss' ? 56 : 26, yy = m.y - (m.type === 'boss' ? 54 : 28);
+        ctx.fillStyle = '#000a'; ctx.fillRect(m.x - w / 2 - 1, yy - 1, w + 2, 5); ctx.fillStyle = m.type === 'boss' ? '#ff4d4d' : '#7ee787'; ctx.fillRect(m.x - w / 2, yy, w * m.hp / m.maxHp, 3); } }
+  }
+  // 牆上火把
+  for (const tc of torches) { if (tc.x < x0 || tc.x > x1 || tc.y < y0 || tc.y > y1) continue;
+    const x = tc.x * T + T / 2, y = tc.y * T + T - FH + 2, fl = Math.sin(t * 12 + tc.ph) * 1.5;
+    ctx.fillStyle = '#5a3a1e'; ctx.fillRect(x - 1.5, y, 3, 9);
+    const g = ctx.createRadialGradient(x, y - 3, 1, x, y - 3, 8 + fl); g.addColorStop(0, '#fff6c2'); g.addColorStop(.4, '#ffb03a'); g.addColorStop(1, 'rgba(255,90,20,0)');
+    ctx.fillStyle = g; ctx.beginPath(); ctx.ellipse(x, y - 4, 5, 9 + fl, 0, 0, 7); ctx.fill(); }
+  // 箭
+  for (const s of shots) { const a = Math.atan2(s.vy, s.vx); ctx.save(); ctx.translate(s.x, s.y); ctx.rotate(a);
+    ctx.strokeStyle = '#8a5a2b'; ctx.lineWidth = 1.6; ctx.beginPath(); ctx.moveTo(-10, 0); ctx.lineTo(4, 0); ctx.stroke();
+    ctx.fillStyle = '#d0d4da'; ctx.beginPath(); ctx.moveTo(8, 0); ctx.lineTo(3, -2.5); ctx.lineTo(3, 2.5); ctx.fill();
+    ctx.fillStyle = '#e8e8e8'; ctx.beginPath(); ctx.moveTo(-10, 0); ctx.lineTo(-13, -3); ctx.lineTo(-7, 0); ctx.lineTo(-13, 3); ctx.fill(); ctx.restore(); }
+  // 特效
+  for (const f of fx) {
+    if (f.k === 'blood') { ctx.fillStyle = f.c; ctx.globalAlpha = f.t * 2; ctx.beginPath(); ctx.arc(f.x, f.y, 2, 0, 7); ctx.fill(); ctx.globalAlpha = 1; }
+    else if (f.k === 'poof') { const k = 1 - f.t / .6; ctx.fillStyle = `rgba(160,160,170,${.6 * (1 - k)})`; for (let i = 0; i < 6; i++) { const a = i * 1.05; ctx.beginPath(); ctx.arc(f.x + Math.cos(a) * k * 18, f.y + Math.sin(a) * k * 14, 6 + k * 6, 0, 7); ctx.fill(); } }
+    else if (f.k === 'ring') { const k = 1 - f.t / .55, r = 20 + k * 80;
+      const g = ctx.createRadialGradient(f.x, f.y, r * .6, f.x, f.y, r); g.addColorStop(0, 'rgba(255,120,20,0)'); g.addColorStop(.7, `rgba(255,170,40,${.7 * (1 - k)})`); g.addColorStop(1, 'rgba(255,60,10,0)');
+      ctx.fillStyle = g; ctx.beginPath(); ctx.arc(f.x, f.y, r, 0, 7); ctx.fill();
+      for (let i = 0; i < 14; i++) { const a = i / 14 * 6.28 + k; ctx.fillStyle = `rgba(255,${180 + i * 5},60,${1 - k})`; ctx.beginPath(); ctx.ellipse(f.x + Math.cos(a) * r, f.y + Math.sin(a) * r - 4, 4, 8, 0, 0, 7); ctx.fill(); } }
+    else if (f.k === 'quake') { const k = 1 - f.t / .5; ctx.strokeStyle = `rgba(200,150,100,${1 - k})`; ctx.lineWidth = 4; ctx.beginPath(); ctx.arc(f.x, f.y, 80 * (.5 + k * .6), 0, 7); ctx.stroke(); }
+    else if (f.k === 'spark') { ctx.fillStyle = `rgba(255,220,100,${f.t})`; const d = (1 - f.t) * 40; ctx.beginPath(); ctx.arc(f.x + f.vx * d, f.y + f.vy * d - d * .5, 2, 0, 7); ctx.fill(); }
+  }
+  for (const x of texts) if (!x.screen) { ctx.globalAlpha = Math.min(1, x.t * 2); ctx.font = `900 ${x.size}px system-ui`; ctx.textAlign = 'center'; ctx.lineWidth = 3; ctx.strokeStyle = '#000c'; ctx.strokeText(x.s, x.x, x.y); ctx.fillStyle = x.col; ctx.fillText(x.s, x.x, x.y); ctx.globalAlpha = 1; }
+  ctx.restore();
+  // 黑暗與火光
+  dg.setTransform(SC, 0, 0, SC, 0, 0); dg.globalCompositeOperation = 'source-over'; dg.clearRect(0, 0, W, H);
+  dg.fillStyle = 'rgba(5,3,10,.9)'; dg.fillRect(0, 0, W, H); dg.globalCompositeOperation = 'destination-out';
+  const fl = Math.sin(t * 9) * 4 + Math.sin(t * 23) * 2, px = pl.x - camX + sx, py = pl.y - camY + sy;
+  let g = dg.createRadialGradient(px, py, 30, px, py, 195 + fl); g.addColorStop(0, 'rgba(0,0,0,1)'); g.addColorStop(.6, 'rgba(0,0,0,.85)'); g.addColorStop(1, 'rgba(0,0,0,0)');
+  dg.fillStyle = g; dg.beginPath(); dg.arc(px, py, 200 + fl, 0, 7); dg.fill();
+  for (const tc of torches) { const x = tc.x * T + T / 2 - camX + sx, y = tc.y * T + T - FH - camY + sy; if (x < -90 || x > W + 90 || y < -90 || y > H + 90) continue;
+    g = dg.createRadialGradient(x, y, 4, x, y, 85); g.addColorStop(0, 'rgba(0,0,0,.85)'); g.addColorStop(1, 'rgba(0,0,0,0)'); dg.fillStyle = g; dg.beginPath(); dg.arc(x, y, 85, 0, 7); dg.fill(); }
+  if (door.open || hasKey) { const x = (door.x + .5) * T - camX, y = (door.y + .5) * T - camY; g = dg.createRadialGradient(x, y, 4, x, y, 70); g.addColorStop(0, 'rgba(0,0,0,.8)'); g.addColorStop(1, 'rgba(0,0,0,0)'); dg.fillStyle = g; dg.beginPath(); dg.arc(x, y, 70, 0, 7); dg.fill(); }
+  for (const f of fx) if (f.k === 'ring') { const x = f.x - camX, y = f.y - camY; g = dg.createRadialGradient(x, y, 10, x, y, 130); g.addColorStop(0, 'rgba(0,0,0,.9)'); g.addColorStop(1, 'rgba(0,0,0,0)'); dg.fillStyle = g; dg.beginPath(); dg.arc(x, y, 130, 0, 7); dg.fill(); }
+  ctx.setTransform(1, 0, 0, 1, 0, 0); ctx.drawImage(dark, 0, 0); ctx.setTransform(SC, 0, 0, SC, 0, 0);
+  // 暖色火光
+  g = ctx.createRadialGradient(px, py, 10, px, py, 170); g.addColorStop(0, 'rgba(255,170,80,.12)'); g.addColorStop(1, 'rgba(255,120,40,0)'); ctx.fillStyle = g; ctx.fillRect(0, 0, W, H);
+  if (pl.inv > .45 && state === 'play') { ctx.fillStyle = `rgba(200,0,0,${(pl.inv - .45) * .8})`; ctx.fillRect(0, 0, W, H); }
+  // 小地圖
+  drawMini();
+  // 出口方向提示（拿到鑰匙後）
+  if (hasKey && state === 'play') { const dx = (door.x + .5) * T - pl.x, dy = (door.y + .5) * T - pl.y; if (Math.hypot(dx, dy) > 160) { const a = Math.atan2(dy, dx), ex = W / 2 + Math.cos(a) * 120, ey = H / 2 + Math.sin(a) * 160;
+    ctx.save(); ctx.translate(ex, ey); ctx.rotate(a); ctx.fillStyle = `rgba(126,231,135,${.6 + Math.sin(t * 6) * .3})`; ctx.beginPath(); ctx.moveTo(14, 0); ctx.lineTo(-6, -9); ctx.lineTo(-2, 0); ctx.lineTo(-6, 9); ctx.fill(); ctx.restore(); } }
+  for (const x of texts) if (x.screen) { ctx.globalAlpha = Math.min(1, x.t); ctx.font = `900 ${x.size}px system-ui`; ctx.textAlign = 'center'; ctx.lineWidth = 4; ctx.strokeStyle = '#000d'; ctx.strokeText(x.s, x.x, x.y); ctx.fillStyle = x.col; ctx.fillText(x.s, x.x, x.y); ctx.globalAlpha = 1; }
+}
+function drawMini() {
+  const s = Math.min(3, 84 / Math.max(MW, MH)), mx = W - MW * s - 8, my = 8;
+  ctx.fillStyle = 'rgba(0,0,0,.55)'; ctx.fillRect(mx - 3, my - 3, MW * s + 6, MH * s + 6);
+  for (let y = 0; y < MH; y++) for (let x = 0; x < MW; x++) if (seen[y][x] && map[y][x] !== 1) { ctx.fillStyle = 'rgba(200,190,220,.55)'; ctx.fillRect(mx + x * s, my + y * s, s, s); }
+  for (const c of chests) if (seen[c.y][c.x] && !c.open) { ctx.fillStyle = c.key ? '#ffd166' : '#c98a3a'; ctx.fillRect(mx + c.x * s - .5, my + c.y * s - .5, s + 1, s + 1); }
+  if (seen[door.y][door.x] || hasKey) { ctx.fillStyle = '#7ee787'; ctx.fillRect(mx + door.x * s - .5, my + door.y * s - .5, s + 1, s + 1); }
+  ctx.fillStyle = '#ff5050'; ctx.beginPath(); ctx.arc(mx + pl.x / T * s, my + pl.y / T * s, 2, 0, 7); ctx.fill();
+}
+
+let last = performance.now();
+function loop(now) {
+  const dt = Math.min(.05, (now - last) / 1000); last = now;
+  update(dt); draw(); requestAnimationFrame(loop);
+}
+pl = newPlayer(); genLevel(0); requestAnimationFrame(loop);
+
+window.__zm = { get state() { return state; }, get pl() { return pl; }, get mons() { return mons; }, get map() { return map; }, get chests() { return chests; }, get door() { return door; },
+  get lv() { return lv; }, get hasKey() { return hasKey; }, get gold() { return gold; }, get score() { return score; }, get kills() { return kills; }, inp, bfs, startGame, startLevel, T };
+</script>
+</body>
+</html>
